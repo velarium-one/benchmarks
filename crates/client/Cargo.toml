@@ -8,3 +8,6 @@ publish = false
 config = { path = "../config" }
 libloading = "0.8"
 thiserror = "1"
+
+[build-dependencies]
+config = { path = "../config" }

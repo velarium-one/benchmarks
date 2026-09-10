@@ -38,6 +38,11 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// Loads the trusted engine selected by this client's build; no ambient path search is used.
+    pub fn acquired() -> Result<Self, LoadError> {
+        unsafe { Self::load(Path::new(env!("VLR_ENGINE_PATH"))) }
+    }
+
     /// [nb:entry] Loads an exact trusted engine path and admits its public ABI revision.
     ///
     /// # Safety
