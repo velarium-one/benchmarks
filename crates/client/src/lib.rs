@@ -38,9 +38,11 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// Exact build-owned engine path, also useful for provenance and direct launch.
+    pub fn acquired_path() -> &'static Path { Path::new(env!("VLR_ENGINE_PATH")) }
     /// Loads the trusted engine selected by this client's build; no ambient path search is used.
     pub fn acquired() -> Result<Self, LoadError> {
-        unsafe { Self::load(Path::new(env!("VLR_ENGINE_PATH"))) }
+        unsafe { Self::load(Self::acquired_path()) }
     }
 
     /// [nb:entry] Loads an exact trusted engine path and admits its public ABI revision.
@@ -53,7 +55,11 @@ impl Engine {
         if !path.is_absolute() {
             return Err(LoadError::RelativePath(path.to_owned()));
         }
-        let library = unsafe { Library::new(path) }
+        // Linux policy: Vehicles bind runtime support from this retained engine's global scope.
+        // Program admission rejects an earlier engine/executable that owns those symbols.
+        let library: Library = unsafe { libloading::os::unix::Library::open(Some(path),
+            libloading::os::unix::RTLD_NOW | libloading::os::unix::RTLD_GLOBAL) }
+            .map(Library::from)
             .map_err(|source| LoadError::Library { path: path.to_owned(), source })?;
         let get_api = unsafe { library.get::<GetApi>(b"vlrts_get_api\0") }
             .map_err(LoadError::MissingBootstrap)?;
