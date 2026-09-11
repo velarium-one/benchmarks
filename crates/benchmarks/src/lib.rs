@@ -5,6 +5,7 @@ pub mod measurement;
 #[cfg(feature = "engine")] pub mod provider;
 #[cfg(feature = "engine")] pub mod build;
 #[cfg(feature = "engine")] pub mod vehicle;
+#[cfg(feature = "engine")] pub mod runner;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 

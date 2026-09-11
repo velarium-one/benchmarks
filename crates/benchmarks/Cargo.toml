@@ -23,3 +23,9 @@ rstest = "0.26"
 name = "demo"
 path = "src/main.rs"
 required-features = ["engine"]
+
+[[bench]]
+name = "demo"
+path = "benches/demo.rs"
+harness = false
+required-features = ["engine"]

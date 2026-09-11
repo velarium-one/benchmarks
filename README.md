@@ -11,6 +11,7 @@ From this workspace:
 cargo build
 cargo test -p benchmarks --test correctness
 cargo run -p benchmarks --bin demo -- correctness lz4
+cargo bench -p benchmarks --bench demo -- lz4 --warmups 2 --samples 10 --json results.json
 ```
 
 The two `rstest` cases are readable compile → prepare program → create session → prepare
@@ -39,3 +40,28 @@ Guest and native workspaces are excluded from ordinary host targets; explicit pa
 locked Cargo builds own their freshness. Native workers do not depend on the client or acquire
 the engine. Original project-code licensing and release distribution are still pending owner
 decisions; no publication-readiness claim is made here.
+
+## Measurements
+
+The custom bench and `demo bench` use the same runner. Omit the workload selector to run both
+cases. Each comparison has host-native, i686-native, uncounted Vehicle and counted Vehicle arms.
+Every sample must match the independent expectation before it enters the report. Native timings
+come from inside each worker, not its process startup or pipe transfer. Counted/uncounted Vehicle
+order alternates; reset, preloading, compilation and output checks are outside invocation timing.
+
+For mean invocation times `T`, the percentages are `100 * T_native / T_vehicle`: 100% means
+equal throughput. Counted frequency is total instructions / counted seconds only. Counting overhead
+is `100 * (T_counted / T_uncounted - 1)`, including negative observations. No counter from another
+invocation is attached to uncounted time. Timer overhead is reported separately, never subtracted.
+
+Console output includes the full raw report; `--json` writes that same record. It includes samples,
+stage durations, artifact/configuration/input hashes, actual acquired engine hash and ABI revision,
+target build arguments, CPU/affinity, compiler versions and timing exclusions. Native target-default
+SIMD and libc allocators differ from the guest's bump allocator; native copy/allocation, processing,
+projection and ordinary input cleanup are timed. Guest reclamation occurs during untimed reset.
+Pinning is disabled for all arms. No performance threshold is a correctness assertion.
+
+Current validation: LZ4 public execution passes; WASM O2 exceeded a 120-second GCC preparation
+budget, so complete WASM correctness and four-arm performance evidence are not yet accepted.
+The runner does not impose that development-validation timeout itself. Large reruns need a deliberate
+budget; do not mistake `cargo bench --no-run` or arithmetic tests for measured-demo acceptance.
