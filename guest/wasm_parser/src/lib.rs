@@ -2,11 +2,6 @@
 
 use wasmparser::{Encoding, Operator, Parser, Payload, TypeRef};
 
-#[cfg(target_arch = "riscv32")]
-mod guest;
-#[cfg(target_arch = "riscv32")]
-pub use guest::{WasmFixtureConfig, run};
-
 const FNV1A_OFFSET_BASIS: u32 = 0x811c_9dc5;
 const FNV1A_PRIME: u32 = 0x0100_0193;
 

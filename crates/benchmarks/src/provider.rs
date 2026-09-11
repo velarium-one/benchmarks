@@ -8,7 +8,7 @@ use crate::cases::Case;
 pub struct Provider<'a> {
     case: &'a Case,
     input: &'a [u8],
-    handles: Vec<()>,
+    handles: Vec<&'a [u8]>,
 }
 impl<'a> Provider<'a> {
     pub fn new(case: &'a Case, input: &'a [u8]) -> Self { Self { case, input, handles: Vec::new() } }
@@ -39,22 +39,22 @@ impl<'a> Provider<'a> {
                     unsafe { std::slice::from_raw_parts(gmem.add(*address as usize), *length as usize) }
                 };
                 let Ok(path) = std::str::from_utf8(key) else { return 1; };
-                if path.is_empty() || path.starts_with('/') || path.contains('\0')
-                    || path.split('/').any(|part| part == "..") { return 1; }
-                if key != self.case.workload.key() { return 2; }
-                let Ok(size) = u32::try_from(self.case.input.len()) else { return 4; };
+                if !crate::cases::valid_key(path) { return 1; }
+                let Some(bytes) = self.case.resources.get(path) else { return 2; };
+                let Ok(size) = u32::try_from(bytes.len()) else { return 4; };
                 let Some(handle) = self.handles.len().checked_add(1).and_then(|n| u32::try_from(n).ok()) else { return 10; };
-                self.handles.push(());
+                self.handles.push(bytes);
                 let record: Vec<_> = [handle, size].into_iter().flat_map(u32::to_le_bytes).collect();
                 unsafe { std::ptr::copy_nonoverlapping(record.as_ptr(), gmem.add(*result as usize), 8); }
                 0
             }
             [6, handle, destination, length] => {
                 if *handle == 0 || *handle as usize > self.handles.len() { return 5; }
-                if *length as usize != self.case.input.len() { return 6; }
+                let bytes = self.handles[*handle as usize - 1];
+                if *length as usize != bytes.len() { return 6; }
                 if *length != 0 {
-                    unsafe { std::ptr::copy_nonoverlapping(self.case.input.as_ptr(),
-                        gmem.add(*destination as usize), self.case.input.len()); }
+                    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(),
+                        gmem.add(*destination as usize), bytes.len()); }
                 }
                 0
             }

@@ -1,9 +1,0 @@
-[package]
-name = "lz4_world_u32"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-riscv-fixture-allocator = { path = "../../allocator" }
-riscv-fixture-kernel = { path = "../../kernel" }
-riscv-fixture-lz4 = { path = "../../lz4" }

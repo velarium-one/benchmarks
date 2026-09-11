@@ -1,7 +1,7 @@
 //! Public workload orchestration and measurements; synthesis and system execution stay in vlrts.
 pub mod cases;
-pub mod workload;
 pub mod measurement;
+pub use guest_kit::{Resources, native};
 #[cfg(feature = "engine")] pub mod provider;
 #[cfg(feature = "engine")] pub mod build;
 #[cfg(feature = "engine")] pub mod vehicle;

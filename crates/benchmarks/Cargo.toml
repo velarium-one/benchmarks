@@ -13,19 +13,15 @@ client = { path = "../client", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-lz4_flex = { version = "=0.14.0", default-features = false, features = ["checked-decode", "safe-decode"] }
-riscv-fixture-wasm-parser = { path = "../../guest/wasm-parser" }
+guest-kit = { path = "../../guest/common/support" }
 
 [dev-dependencies]
 rstest = "0.26"
 
-[[bin]]
-name = "demo"
-path = "src/main.rs"
-required-features = ["engine"]
+[build-dependencies]
+glob = "0.3"
 
-[[bench]]
-name = "demo"
-path = "benches/demo.rs"
-harness = false
+[[bin]]
+name = "bench"
+path = "src/main.rs"
 required-features = ["engine"]

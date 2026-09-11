@@ -3,7 +3,7 @@
 use std::{path::PathBuf, process::Command, time::Instant};
 use serde::Serialize;
 use client::{Engine, config::ffi::ABI_REVISION};
-use crate::{Result, build::{self, Product}, cases::{Case, Workload}, measurement::{self, NativeRecord, Sample, Comparison}, vehicle};
+use crate::{Result, build::{self, Product}, cases::{self, Case, Entry}, measurement::{self, NativeRecord, Sample, Comparison}, vehicle};
 
 #[derive(Debug, Serialize)]
 pub struct VehicleProduct {
@@ -36,9 +36,10 @@ pub struct Environment {
 
 #[derive(Debug, Serialize)]
 pub struct Report {
-    pub workload: Workload,
-    pub input_sha256: String,
-    pub expected_output_sha256: String,
+    pub entry: Entry,
+    pub snapshot_sha256: String,
+    pub expected_output_sha256: Option<String>,
+    pub validation: &'static str,
     pub environment: Environment,
     pub guest: Product,
     pub native_products: [Product; 2],
@@ -81,8 +82,9 @@ fn environment() -> Result<Environment> {
 
 pub fn validate_native(record: &NativeRecord, case: &Case, target: &str, warmups: usize, samples: usize) -> Result<()> {
     let width = match target { build::HOST => 64, build::I686 => 32, _ => return Err("unknown native arm".into()) };
-    if record.target != target || record.pointer_width != width || record.input_sha256 != case.input_sha256
-        || record.warmups != warmups || record.samples.len() != samples {
+    if record.target != target || record.pointer_width != width || record.snapshot_sha256 != case.snapshot_sha256
+        || record.warmups != warmups || record.samples.len() != samples
+        || record.expected_sha256 != case.expected.as_ref().map(|value| crate::sha256(value.bytes())) {
         return Err("native worker evidence does not match request".into());
     }
     measurement::summarize(&record.samples, false)?;
@@ -90,9 +92,7 @@ pub fn validate_native(record: &NativeRecord, case: &Case, target: &str, warmups
 }
 
 fn native(product: &Product, case: &Case, warmups: usize, samples: usize) -> Result<NativeRecord> {
-    let output = Command::new(&product.path).arg(case.workload.name())
-        .arg(crate::root().join(case.workload.input_path()))
-        .arg(crate::root().join(case.workload.expected_path()))
+    let output = Command::new(&product.path).arg(&case.manifest)
         .arg(warmups.to_string()).arg(samples.to_string()).output()?;
     if !output.status.success() {
         return Err(format!("native arm {} failed: {}", product.target, String::from_utf8_lossy(&output.stderr)).into());
@@ -103,29 +103,36 @@ fn native(product: &Product, case: &Case, warmups: usize, samples: usize) -> Res
 }
 
 /// [nb:entry] Prepare exact products, then measure four output-validated arms for one fixed input.
-pub fn run(workload: Workload, warmups: usize, samples: usize) -> Result<Report> {
+pub fn run(entry: &Entry, warmups: usize, samples: usize) -> Result<Report> {
     if samples == 0 { return Err("sample count must be positive".into()); }
     // Establish all build products and preload the client-owned snapshot before measurement.
-    let case = Case::standard(workload)?;
-    let native_products = [build::native(build::HOST)?, build::native(build::I686)?];
-    let guest = build::guest(workload)?;
+    let case = Case::load(&entry.fixture)?;
+    let native_products = [build::native(entry, build::HOST)?, build::native(entry, build::I686)?];
+    let guest = build::guest(entry)?;
     let environment = environment()?;
     let engine = Engine::acquired()?;
     let directory = crate::root().join("target/vehicles");
+
     std::fs::create_dir_all(&directory)?;
+
     let mut sessions = Vec::new();
     let mut vehicle_products = Vec::new();
+
     for counted in [false, true] {
-        let path = directory.join(format!("{}-{}.so", workload.name(), if counted { "counted" } else { "uncounted" }));
-        eprintln!("compiling {} {}", workload.name(), if counted { "counted" } else { "uncounted" });
+        eprintln!("compiling {} {}", entry.name(), if counted { "counted" } else { "uncounted" });
+
+        let path = directory.join(format!("{}-{}.so", entry.artifact_name(), if counted { "counted" } else { "uncounted" }));
         let record = engine.compile_program(&guest.path, &vehicle::config(counted), &path)?;
+
         let start = Instant::now();
         // Trusted matching product; no arbitrary native library admission is claimed.
         let program = unsafe { engine.prepare_program(&path)? };
         let program_preparation_ns = u64::try_from(start.elapsed().as_nanos())?;
+
         let start = Instant::now();
         sessions.push(program.create_session(vehicle::GMEM_CAPACITY)?);
         let session_creation_ns = u64::try_from(start.elapsed().as_nanos())?;
+
         let hex = |bytes: &[u8]| bytes.iter().map(|byte| format!("{byte:02x}")).collect();
         vehicle_products.push(VehicleProduct { path, counted, elf_sha256: hex(&record.elf_sha256),
             config_sha256: hex(&record.config_sha256), vehicle_sha256: hex(&record.vehicle_sha256),
@@ -153,49 +160,67 @@ pub fn run(workload: Workload, warmups: usize, samples: usize) -> Result<Report>
         std::hint::black_box(());
         u64::try_from(start.elapsed().as_nanos()).expect("timer observation fits u64")
     }).collect();
-    Ok(Report { workload, input_sha256: case.input_sha256,
-        expected_output_sha256: crate::sha256(&case.expected), environment, guest, native_products,
+    Ok(Report { entry: entry.clone(), snapshot_sha256: case.snapshot_sha256.clone(),
+        expected_output_sha256: case.expected.as_ref().map(|value| crate::sha256(value.bytes())),
+        validation: case.validation_label(), environment, guest, native_products,
         vehicle_products, host, i686, uncounted_samples, counted_samples, comparison, warmups,
         gmem_capacity: vehicle::GMEM_CAPACITY, timer_overhead_ns,
-        timing_contract: "Vehicle invoke only, Monolithic GCC O2, untraced; complete accessible memory reset and bindings prepared before timer; snapshots/compilation/loading/session setup/oracle checks excluded. Native release target-default CPU/SIMD, x64 glibc or i686 musl allocator: copy/allocation/work/projection/ordinary input cleanup included. Native result Vec allocation is included, result destruction excluded; guest bump allocations are reclaimed by untimed session reset. No timer subtraction; counted denominator belongs only to counted invocation." })
+        timing_contract: "Vehicle invoke only, Monolithic GCC O2, untraced; complete accessible memory reset and bindings prepared before timer; snapshots/compilation/loading/session setup/oracle checks excluded. Native release target-default CPU/SIMD, x64 glibc or i686 musl allocator: copy/allocation/work/projection/ordinary input cleanup included. Native result Vec allocation is included, result destruction excluded; guest bump allocations are reclaimed by untimed session reset. No timer subtraction. Uncounted Hz is estimated from the matching counted arm's instruction total and uncounted elapsed time, assuming identical guest work; uncounted samples remain count-free." })
 }
 
 pub fn print(report: &Report) {
     let comparison = &report.comparison;
-    println!("{}: Vehicle {:.2}% of host-native, {:.2}% of i686; counted {:.3} MHz; counting overhead {:+.2}%",
-        report.workload.name(), comparison.vehicle_percent_host, comparison.vehicle_percent_i686,
-        comparison.counted_hz / 1e6, comparison.counting_overhead_percent);
+    println!("{}: Vehicle {:.2}% of host-native, {:.2}% of i686; counted {:.3} MHz; uncounted {:.3} MHz (derived); counting overhead {:+.2}%",
+        report.entry.name(), comparison.vehicle_percent_host, comparison.vehicle_percent_i686,
+        comparison.counted_hz / 1e6, comparison.uncounted_hz_estimate / 1e6,
+        comparison.counting_overhead_percent);
+    println!("validation: {}", report.validation);
     println!("{}", serde_json::to_string_pretty(report).expect("serializable complete report"));
 }
 
 pub fn cli(arguments: impl IntoIterator<Item = String>) -> Result<()> {
-    let mut arguments = arguments.into_iter().filter(|arg| arg != "--bench");
+    let mut arguments = arguments.into_iter();
     let command = arguments.next().unwrap_or_else(|| "bench".into());
-    if command == "correctness" {
-        let workload = Workload::parse(&arguments.next().ok_or("correctness requires lz4 or wasm")?)?;
-        if arguments.next().is_some() { return Err("unexpected correctness arguments".into()); }
-        vehicle::correctness(&Case::standard(workload)?)?;
-        println!("{}: complete output matches independent expectation", workload.name());
+    if command == "list" {
+        if arguments.next().is_some() { return Err("unexpected list arguments".into()); }
+        for entry in cases::select("all")? { println!("{}", entry.name()); }
         return Ok(());
     }
-    if command != "bench" { return Err("usage: demo bench [lz4|wasm|all] [--warmups N] [--samples N] [--json PATH] | correctness <lz4|wasm>".into()); }
-    let mut workloads = vec![Workload::Lz4, Workload::Wasm];
+    if command == "correctness" {
+        let selector = arguments.next().ok_or("correctness requires a family or family/entry")?;
+        if arguments.next().is_some() { return Err("unexpected correctness arguments".into()); }
+        for entry in cases::select(&selector)? {
+            let case = Case::load(&entry.fixture)?;
+            vehicle::correctness(&entry, &case)?;
+            println!("{}: {}", entry.name(), case.validation_label());
+        }
+        return Ok(());
+    }
+    if command != "bench" {
+        return Err("usage: bench list | correctness <family[/entry]> | bench [family[/entry]|all] [--warmups N] [--samples N] [--json PATH]".into());
+    }
+
+    let mut selector = None;
     let mut warmups = 2;
     let mut samples = 10;
     let mut json_path = None;
     while let Some(arg) = arguments.next() {
         match arg.as_str() {
-            "lz4" | "wasm" => workloads = vec![Workload::parse(&arg)?],
-            "all" => workloads = vec![Workload::Lz4, Workload::Wasm],
             "--warmups" => warmups = arguments.next().ok_or("missing warmups")?.parse()?,
             "--samples" => samples = arguments.next().ok_or("missing samples")?.parse()?,
             "--json" => json_path = Some(PathBuf::from(arguments.next().ok_or("missing JSON path")?)),
-            _ => return Err(format!("unknown argument: {arg}").into()),
+            _ if !arg.starts_with('-') && selector.is_none() => selector = Some(arg),
+            _ => return Err(format!("unknown or duplicate argument: {arg}").into()),
         }
     }
     if samples == 0 { return Err("sample count must be positive".into()); }
+
     let mut reports = Vec::new();
-    for workload in workloads { let report = run(workload, warmups, samples)?; print(&report); reports.push(report); }
+    for entry in cases::select(selector.as_deref().unwrap_or("all"))? {
+        let report = run(&entry, warmups, samples)?;
+        print(&report);
+        reports.push(report);
+    }
     if let Some(path) = json_path { std::fs::write(path, serde_json::to_vec_pretty(&reports)?)?; }
     Ok(())
 }

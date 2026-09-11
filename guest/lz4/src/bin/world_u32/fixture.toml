@@ -1,0 +1,10 @@
+expected-format = "string"
+# Independent values from the original world192 text; see adjacent PROVENANCE.md and evidence.py.
+expected = "1227294,2473400,2228362560,707406378,168626701"
+
+[resources]
+"world192.lz4" = "input.lz4"
+
+# Optional, checks the resource hash before providing it to the guest.
+[resource-sha256]
+"world192.lz4" = "32b2b5b5bb6b7d3ff628557672bf9c90a7bf7933c66684a83a97d4cc4370f9ae"

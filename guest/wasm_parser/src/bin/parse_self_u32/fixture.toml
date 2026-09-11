@@ -1,0 +1,8 @@
+expected-src = "expected.bin"
+
+[resources]
+"input.wasm" = "input.wasm"
+
+# Optional, checks the resource hash before providing it to the guest.
+[resource-sha256]
+"input.wasm" = "2997be387b112d56f77ef24c63852d3556f14844728f46dcfae7089eb295f92c"

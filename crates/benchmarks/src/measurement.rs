@@ -1,5 +1,5 @@
-use crate::{Result, cases::Case, workload};
-use std::time::Instant;
+use crate::Result;
+pub use guest_kit::native::{Sample, NativeRecord};
 
 #[derive(Debug, serde::Serialize)]
 pub struct Summary {
@@ -28,8 +28,8 @@ pub fn summarize(samples: &[Sample], counted: bool) -> Result<Summary> {
         total_instructions: counted.then_some(instructions) })
 }
 
-/// [nb:core] Four accepted arms and their denominator rules. Raw samples remain separate;
-/// uncounted time never receives an instruction count borrowed from another invocation.
+/// [nb:core] Four accepted arms and their rate calculations. Raw samples remain separate;
+/// the estimated uncounted rate uses the matching counted arm's instruction total.
 #[derive(Debug, serde::Serialize)]
 pub struct Comparison {
     pub host: Summary,
@@ -39,9 +39,12 @@ pub struct Comparison {
     pub vehicle_percent_host: f64,
     pub vehicle_percent_i686: f64,
     pub counted_hz: f64,
+    /// Derived from counted instructions and uncounted time, assuming identical guest work.
+    pub uncounted_hz_estimate: f64,
     pub counting_overhead_percent: f64,
 }
 
+/// Arms must execute the same guest workload/input; only the counted Vehicle measures instructions.
 pub fn compare(host: &[Sample], i686: &[Sample], uncounted: &[Sample], counted: &[Sample]) -> Result<Comparison> {
     if [i686.len(), uncounted.len(), counted.len()].iter().any(|n| *n != host.len()) {
         return Err("arms have different sample counts".into());
@@ -50,40 +53,14 @@ pub fn compare(host: &[Sample], i686: &[Sample], uncounted: &[Sample], counted: 
     let i686 = summarize(i686, false)?;
     let uncounted = summarize(uncounted, false)?;
     let counted = summarize(counted, true)?;
+
+    let instructions = counted.total_instructions.expect("counted summary") as f64;
     Ok(Comparison {
         vehicle_percent_host: 100.0 * host.mean_ns / uncounted.mean_ns,
         vehicle_percent_i686: 100.0 * i686.mean_ns / uncounted.mean_ns,
-        counted_hz: counted.total_instructions.expect("counted summary") as f64 * 1e9 / counted.total_ns as f64,
+        counted_hz: instructions * 1e9 / counted.total_ns as f64,
+        uncounted_hz_estimate: instructions * 1e9 / uncounted.total_ns as f64,
         counting_overhead_percent: 100.0 * (counted.mean_ns / uncounted.mean_ns - 1.0),
         host, i686, uncounted, counted,
     })
-}
-
-/// Raw accepted duration of one invocation; count belongs only to that same invocation.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Sample { pub elapsed_ns: u64, pub instructions: Option<u64> }
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct NativeRecord {
-    pub target: String,
-    pub pointer_width: u32,
-    pub input_sha256: String,
-    pub warmups: usize,
-    pub samples: Vec<Sample>,
-}
-
-pub fn native(case: &Case, warmups: usize, repeats: usize, target: &str) -> Result<NativeRecord> {
-    if repeats == 0 { return Err("sample count must be positive".into()); }
-    for _ in 0..warmups { case.validate(&workload::invoke(case.workload, &case.input)?)?; }
-    let mut samples = Vec::with_capacity(repeats);
-    for _ in 0..repeats {
-        let start = Instant::now();
-        let output = workload::invoke(case.workload, &case.input)?;
-        let elapsed_ns = u64::try_from(start.elapsed().as_nanos())?;
-        case.validate(&output)?;
-        if elapsed_ns == 0 { return Err("zero invocation duration".into()); }
-        samples.push(Sample { elapsed_ns, instructions: None });
-    }
-    Ok(NativeRecord { target: target.into(), pointer_width: usize::BITS,
-        input_sha256: case.input_sha256.clone(), warmups, samples })
 }

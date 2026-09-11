@@ -1,9 +1,0 @@
-[package]
-name = "wasm_parse_self_u32"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-riscv-fixture-allocator = { path = "../../allocator" }
-riscv-fixture-kernel = { path = "../../kernel" }
-riscv-fixture-wasm-parser = { path = "../../wasm-parser" }

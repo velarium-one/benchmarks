@@ -1,4 +1,4 @@
 [workspace]
 members = ["crates/config", "crates/client", "crates/benchmarks"]
-exclude = ["guest", "native"]
+exclude = ["guest"]
 resolver = "3"
