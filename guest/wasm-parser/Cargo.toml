@@ -1,0 +1,13 @@
+[package]
+name = "riscv-fixture-wasm-parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wasmparser = { version = "=0.244.0", default-features = false }
+# Preserve the existing workload's dependency closure in all three workspaces.
+bitflags = { version = "=2.13.1", default-features = false }
+
+[target.'cfg(target_arch = "riscv32")'.dependencies]
+riscv-fixture-allocator = { path = "../allocator" }
+riscv-fixture-kernel = { path = "../kernel" }

@@ -1,0 +1,10 @@
+[package]
+name = "riscv-fixture-kernel"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "riscv_fixture_kernel"
+path = "src/lib.rs"
+
+[dependencies]

@@ -1,0 +1,5 @@
+asset=self_input.wasm
+length=119833
+sha256=2997be387b112d56f77ef24c63852d3556f14844728f46dcfae7089eb295f92c
+oracle=WABT 1.0.39 wasm-objdump
+result=WasmFixtureResult { input_length: 119833, section_count: 12, custom_section_count: 3, type_count: 14, imported_function_count: 0, defined_function_count: 146, table_count: 1, memory_count: 1, global_count: 1, export_count: 2, element_count: 1, data_segment_count: 1, code_body_count: 146, operator_count: 42834, control_operator_count: 8438, call_operator_count: 1160, parametric_operator_count: 191, variable_operator_count: 15247, memory_operator_count: 5830, numeric_operator_count: 11968, reference_table_operator_count: 0, facts_fnv1a32: 1479355333 }

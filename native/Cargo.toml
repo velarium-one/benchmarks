@@ -1,0 +1,19 @@
+[workspace]
+members = ["."]
+resolver = "3"
+
+[package]
+name = "native-worker"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+benchmarks = { path = "../crates/benchmarks", default-features = false }
+serde_json = "1"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+debug = false

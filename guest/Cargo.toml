@@ -1,0 +1,9 @@
+[workspace]
+members = ["kernel", "allocator", "lz4", "wasm-parser", "programs/lz4_world_u32", "programs/wasm_parse_self_u32"]
+resolver = "3"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+debug = false
