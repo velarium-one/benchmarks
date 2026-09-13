@@ -13,8 +13,13 @@ impl<'client> ClientBindings<'client> {
     /// remain loaded through invoke/discard, and never unwind through C. Gmem is trusted transport,
     /// not a fully accessible slice; each requested buffer must satisfy its operation's contract.
     pub unsafe fn new<T>(callbacks: ClientCallbacks, state: &'client mut T, input: &'client [u8]) -> Self {
-        Self { raw: InvocationBindings { callbacks, context: (state as *mut T).cast(),
-            input: Bytes::borrowed(input) }, _client: PhantomData }
+        let raw = InvocationBindings {
+            callbacks,
+            context: (state as *mut T).cast(),
+            input: Bytes::borrowed(input),
+        };
+
+        Self { raw, _client: PhantomData }
     }
 }
 
@@ -28,12 +33,17 @@ pub struct PreparedInvocation<'client> {
 impl Session {
     pub fn prepare_invocation<'client>(&self, bindings: ClientBindings<'client>) -> Result<PreparedInvocation<'client>> {
         self.check_access()?;
+
+        let engine = self.engine();
         let mut raw = ptr::null_mut();
         let mut error = ptr::null_mut();
-        let engine = self.engine();
         let status = unsafe { (engine.api().prepare_invocation)(self.0.raw, &bindings.raw, &mut raw, &mut error) };
         engine.finish(status, error)?;
-        if raw.is_null() { return Err(Error::contract("preparation success omitted handle")); }
+
+        if raw.is_null() {
+            return Err(Error::contract("preparation success omitted handle"));
+        }
+
         Ok(PreparedInvocation { raw, session: self.clone(), _client: PhantomData })
     }
 }
@@ -42,23 +52,33 @@ impl PreparedInvocation<'_> {
     /// Consume readiness even if native entry is rejected. Preparation/reset is not repeated.
     pub fn invoke(mut self) -> Result<InvocationResults> {
         self.session.check_access()?;
+
+        let engine = self.session.engine();
         let mut raw = ptr::null_mut();
         let mut error = ptr::null_mut();
-        let engine = self.session.engine();
+        // The engine consumes the preparation slot on either success or entry failure.
         let status = unsafe { (engine.api().invoke)(&mut self.raw, &mut raw, &mut error) };
         engine.finish(status, error)?;
-        if raw.is_null() { return Err(Error::contract("invocation success omitted results")); }
+
+        if raw.is_null() {
+            return Err(Error::contract("invocation success omitted results"));
+        }
+
         Ok(InvocationResults { raw, session: self.session.clone() })
     }
 }
 
 impl Drop for PreparedInvocation<'_> {
     fn drop(&mut self) {
-        if self.raw.is_null() { return; }
+        if self.raw.is_null() {
+            return;
+        }
         self.session.check_access().expect("prepared session cannot also have a result borrow");
-        let mut error = ptr::null_mut();
+
         let engine = self.session.engine();
+        let mut error = ptr::null_mut();
         let status = unsafe { (engine.api().discard_invocation)(&mut self.raw, &mut error) };
+
         engine.finish(status, error).expect("safe preparation discard invariant");
     }
 }
@@ -81,7 +101,9 @@ pub struct InvocationResults {
 
 struct ResultAccess<'a>(&'a Session);
 impl Drop for ResultAccess<'_> {
-    fn drop(&mut self) { self.0.0.accessing.set(false); }
+    fn drop(&mut self) {
+        self.0.0.accessing.set(false);
+    }
 }
 
 impl InvocationResults {
@@ -92,6 +114,7 @@ impl InvocationResults {
         self.session.check_access()?;
         self.session.0.accessing.set(true);
         let _access = ResultAccess(&self.session);
+
         let engine = self.session.engine();
         let mut view = ffi::InvocationView::EMPTY;
         let mut error = ptr::null_mut();
@@ -109,36 +132,53 @@ impl InvocationResults {
             1 => Some(unsafe { bytes(view.output)? }),
             _ => return Err(Error::contract("invalid output presence")),
         };
-        let count = usize::try_from(view.counters_len).map_err(|_| Error::contract("counter length exceeds host"))?;
-        if count > isize::MAX as usize / std::mem::size_of::<ffi::CounterView>() {
+
+        // Counter descriptors borrow engine storage; their Rust projection lives through the closure.
+        let counter_count = usize::try_from(view.counters_len)
+            .map_err(|_| Error::contract("counter length exceeds host"))?;
+        if counter_count > isize::MAX as usize / std::mem::size_of::<ffi::CounterView>() {
             return Err(Error::contract("counter extent exceeds slice limit"));
         }
-        let wire = if count == 0 { &[] } else {
+        let wire_counters = if counter_count == 0 {
+            &[]
+        } else {
             if view.counters.is_null() || !view.counters.is_aligned() {
                 return Err(Error::contract("invalid counter array"));
             }
-            unsafe { std::slice::from_raw_parts(view.counters, count) }
+            unsafe { std::slice::from_raw_parts(view.counters, counter_count) }
         };
-        let counters = wire.iter().map(|entry| {
-            let name = std::str::from_utf8(unsafe { bytes(entry.name)? })
-                .map_err(|_| Error::contract("counter name is not UTF-8"))?;
-            Ok(Counter { name, value: entry.value })
-        }).collect::<Result<Vec<_>>>()?;
-        if (outcome == Outcome::Completed) != output.is_some()
-            || (outcome == Outcome::ClientTerminated && !counters.is_empty()) {
+        let counters = wire_counters.iter()
+            .map(|entry| {
+                let name_bytes = unsafe { bytes(entry.name)? };
+                let name = std::str::from_utf8(name_bytes)
+                    .map_err(|_| Error::contract("counter name is not UTF-8"))?;
+
+                Ok(Counter { name, value: entry.value })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Each outcome admits a distinct publication shape, independent of descriptor validity.
+        let publication_matches_outcome = match outcome {
+            Outcome::Completed => output.is_some(),
+            Outcome::ClientTerminated => output.is_none() && counters.is_empty(),
+        };
+        if !publication_matches_outcome {
             return Err(Error::contract("outcome has inconsistent output/counters"));
         }
-        Ok(callback(ResultView { outcome, output, counters: &counters }))
+
+        let results = ResultView { outcome, output, counters: &counters };
+        Ok(callback(results))
     }
 }
 
 impl Drop for InvocationResults {
     fn drop(&mut self) {
-        let mut error = ptr::null_mut();
         let engine = self.session.engine();
+        let mut error = ptr::null_mut();
         // Releasing a different result does not mutate guest storage. The result currently
         // borrowed by a closure retains the session until its access guard is gone.
         let status = unsafe { (engine.api().release_results)(&mut self.raw, &mut error) };
+
         engine.finish(status, error).expect("safe result release invariant");
     }
 }

@@ -10,22 +10,41 @@ pub struct Summary {
 }
 
 pub fn summarize(samples: &[Sample], counted: bool) -> Result<Summary> {
-    if samples.is_empty() { return Err("missing arm samples".into()); }
+    if samples.is_empty() {
+        return Err("missing arm samples".into());
+    }
+
+    // Admit each duration and its counter availability before publishing the arm summary.
     let mut total_ns = 0u64;
     let mut instructions = 0u64;
     for sample in samples {
-        if sample.elapsed_ns == 0 { return Err("zero invocation duration".into()); }
-        total_ns = total_ns.checked_add(sample.elapsed_ns).ok_or("duration total overflow")?;
+        if sample.elapsed_ns == 0 {
+            return Err("zero invocation duration".into());
+        }
+        total_ns = total_ns.checked_add(sample.elapsed_ns)
+            .ok_or("duration total overflow")?;
+
         match (counted, sample.instructions) {
             (false, None) => (),
             (true, Some(value)) if value != 0 => {
-                instructions = instructions.checked_add(value).ok_or("instruction total overflow")?;
+                instructions = instructions.checked_add(value)
+                    .ok_or("instruction total overflow")?;
             }
             _ => return Err("counter availability differs from arm".into()),
         }
     }
-    Ok(Summary { total_ns, sample_count: samples.len(), mean_ns: total_ns as f64 / samples.len() as f64,
-        total_instructions: counted.then_some(instructions) })
+
+    // Absence of counting remains distinct from a measured instruction total.
+    let sample_count = samples.len();
+    let mean_ns = total_ns as f64 / sample_count as f64;
+    let total_instructions = counted.then_some(instructions);
+
+    Ok(Summary {
+        total_ns,
+        sample_count,
+        mean_ns,
+        total_instructions,
+    })
 }
 
 /// [nb:core] Four accepted arms and their rate calculations. Raw samples remain separate;
@@ -49,18 +68,30 @@ pub fn compare(host: &[Sample], i686: &[Sample], uncounted: &[Sample], counted: 
     if [i686.len(), uncounted.len(), counted.len()].iter().any(|n| *n != host.len()) {
         return Err("arms have different sample counts".into());
     }
+
     let host = summarize(host, false)?;
     let i686 = summarize(i686, false)?;
     let uncounted = summarize(uncounted, false)?;
     let counted = summarize(counted, true)?;
 
+    let vehicle_percent_host = 100.0 * host.mean_ns / uncounted.mean_ns;
+    let vehicle_percent_i686 = 100.0 * i686.mean_ns / uncounted.mean_ns;
+
     let instructions = counted.total_instructions.expect("counted summary") as f64;
+    let counted_hz = instructions * 1e9 / counted.total_ns as f64;
+    let uncounted_hz_estimate = instructions * 1e9 / uncounted.total_ns as f64;
+
+    let counting_overhead_percent = 100.0 * (counted.mean_ns / uncounted.mean_ns - 1.0);
+
     Ok(Comparison {
-        vehicle_percent_host: 100.0 * host.mean_ns / uncounted.mean_ns,
-        vehicle_percent_i686: 100.0 * i686.mean_ns / uncounted.mean_ns,
-        counted_hz: instructions * 1e9 / counted.total_ns as f64,
-        uncounted_hz_estimate: instructions * 1e9 / uncounted.total_ns as f64,
-        counting_overhead_percent: 100.0 * (counted.mean_ns / uncounted.mean_ns - 1.0),
-        host, i686, uncounted, counted,
+        host,
+        i686,
+        uncounted,
+        counted,
+        vehicle_percent_host,
+        vehicle_percent_i686,
+        counted_hz,
+        uncounted_hz_estimate,
+        counting_overhead_percent,
     })
 }

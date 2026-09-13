@@ -18,44 +18,84 @@ pub struct Product {
 }
 
 pub fn guest(entry: &Entry) -> Result<Product> {
-    product(entry, GUEST,
-        "-C link-arg=--emit-relocs -C target-feature=+m", "guest")
+    product(entry, GUEST, "-C link-arg=--emit-relocs -C target-feature=+m", "guest")
 }
 
 pub fn native(entry: &Entry, target: &str) -> Result<Product> {
-    if target != HOST && target != I686 { return Err("unsupported native target".into()); }
+    let expected_elf_class = match target {
+        HOST => 2, // ELFCLASS64
+        I686 => 1, // ELFCLASS32
+        _ => return Err("unsupported native target".into()),
+    };
+
     let product = product(entry, target, "", "native")?;
     let bytes = std::fs::read(&product.path)?;
-    let class = if target == I686 { 1 } else { 2 };
-    if bytes.get(..4) != Some(b"\x7fELF") || bytes.get(4) != Some(&class) {
+
+    let is_elf = bytes.get(..4) == Some(b"\x7fELF");
+    let class_matches = bytes.get(4) == Some(&expected_elf_class);
+    if !is_elf || !class_matches {
         return Err(format!("native product is not the requested ELF class: {target}").into());
     }
+
     Ok(product)
 }
 
 fn product(entry: &Entry, target: &str, flags: &str, directory: &str) -> Result<Product> {
+    // Select one Cargo binary and its isolated target directory.
     let package = &entry.package;
-    let arguments: Vec<String> = ["build", "--locked", "--release", "--jobs", "1",
-        "--message-format=json-render-diagnostics", "--manifest-path", &entry.workspace.to_string_lossy(),
-        "--package", package, "--bin", &entry.binary, "--target", target, "--target-dir",
-        &crate::root().join("target").join(directory).to_string_lossy()]
-        .into_iter().map(str::to_owned).collect();
-    let output = Command::new("cargo").args(&arguments).env("RUSTFLAGS", flags)
-        .env_remove("CARGO_ENCODED_RUSTFLAGS").env_remove("RUSTC_WRAPPER")
-        .env_remove("RUSTC_WORKSPACE_WRAPPER").stderr(Stdio::inherit()).output()?;
-    if !output.status.success() { return Err(format!("Cargo failed for {package}/{target}: {}", output.status).into()); }
+    let workspace = entry.workspace.to_string_lossy();
+    let output_directory = crate::root().join("target").join(directory);
+    let arguments: Vec<String> = [
+        "build", "--locked", "--release", "--jobs", "1",
+        "--message-format=json-render-diagnostics",
+        "--manifest-path", &workspace,
+        "--package", package,
+        "--bin", &entry.binary,
+        "--target", target,
+        "--target-dir", &output_directory.to_string_lossy(),
+    ].into_iter().map(str::to_owned).collect();
+
+    // Cargo owns freshness; inherited compiler wrappers must not change the requested product.
+    let output = Command::new("cargo")
+        .args(&arguments)
+        .env("RUSTFLAGS", flags)
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .env_remove("RUSTC_WRAPPER")
+        .env_remove("RUSTC_WORKSPACE_WRAPPER")
+        .stderr(Stdio::inherit())
+        .output()?;
+    if !output.status.success() {
+        return Err(format!("Cargo failed for {package}/{target}: {}", output.status).into());
+    }
+
+    // Admit exactly one executable from the requested binary's artifact messages.
     let mut executable = None;
     for line in output.stdout.split(|byte| *byte == b'\n').filter(|line| !line.is_empty()) {
         let message: serde_json::Value = serde_json::from_slice(line)?;
-        if message["reason"] == "compiler-artifact" && message["target"]["name"] == entry.binary
-            && message["target"]["kind"].as_array().is_some_and(|kinds| kinds.iter().any(|kind| kind == "bin")) {
-            if let Some(path) = message["executable"].as_str() {
-                if executable.is_some() { return Err("ambiguous Cargo executable products".into()); }
-                executable = Some(PathBuf::from(path));
-            }
+        if message["reason"] != "compiler-artifact" || message["target"]["name"] != entry.binary {
+            continue;
         }
+
+        let is_binary = message["target"]["kind"].as_array()
+            .is_some_and(|kinds| kinds.iter().any(|kind| kind == "bin"));
+        if !is_binary { continue; }
+        let Some(path) = message["executable"].as_str() else { continue; };
+
+        if executable.is_some() {
+            return Err("ambiguous Cargo executable products".into());
+        }
+        executable = Some(PathBuf::from(path));
     }
+
+    // Bind the artifact bytes to the request that produced them.
     let path = executable.ok_or("Cargo supplied no executable product")?.canonicalize()?;
-    Ok(Product { sha256: crate::sha256(&std::fs::read(&path)?), path, target: target.into(),
-        cargo_arguments: arguments, rustflags: flags.into() })
+    let sha256 = crate::sha256(&std::fs::read(&path)?);
+
+    Ok(Product {
+        path,
+        sha256,
+        target: target.into(),
+        cargo_arguments: arguments,
+        rustflags: flags.into(),
+    })
 }

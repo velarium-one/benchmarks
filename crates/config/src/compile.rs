@@ -24,7 +24,7 @@ impl RiscvLoweringMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Optimization { O0, O2 }
+pub enum Optimization { O0, O2, O3 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

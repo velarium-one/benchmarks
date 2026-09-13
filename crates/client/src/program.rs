@@ -14,6 +14,7 @@ impl Drop for ProgramInner {
     fn drop(&mut self) {
         let mut error = ptr::null_mut();
         let status = unsafe { (self.engine.api().release_program)(&mut self.raw, &mut error) };
+
         self.engine.finish(status, error).expect("safe Program release invariant");
     }
 }
@@ -22,12 +23,17 @@ impl Engine {
     /// Delete, compile, then publish one Vehicle; no generated source crosses this boundary.
     pub fn compile_program(&self, elf: &Path, config: &CompileConfig, output: &Path) -> Result<CompilationRecord> {
         let json = config.to_json().map_err(|e| Error::contract(e.to_string()))?;
+        let elf_path = Bytes::borrowed(elf.as_os_str().as_bytes());
+        let configuration = Bytes::borrowed(&json);
+        let output_path = Bytes::borrowed(output.as_os_str().as_bytes());
+
         let mut record = CompilationRecord::default();
         let mut error = ptr::null_mut();
-        let status = unsafe { (self.api().compile_program)(
-            Bytes::borrowed(elf.as_os_str().as_bytes()), Bytes::borrowed(&json),
-            Bytes::borrowed(output.as_os_str().as_bytes()), &mut record, &mut error) };
+        let status = unsafe {
+            (self.api().compile_program)(elf_path, configuration, output_path, &mut record, &mut error)
+        };
         self.finish(status, error)?;
+
         Ok(record)
     }
 
@@ -44,12 +50,21 @@ impl Engine {
     /// # Safety
     /// Same trusted/matching native-code contract as prepare_program.
     pub unsafe fn prepare_program_with_pinning(&self, path: &Path, pin: bool) -> Result<Program> {
+        let vehicle_path = Bytes::borrowed(path.as_os_str().as_bytes());
+        let pin_thread = u64::from(pin);
+
         let mut raw = ptr::null_mut();
         let mut error = ptr::null_mut();
-        let status = unsafe { (self.api().prepare_program)(Bytes::borrowed(path.as_os_str().as_bytes()),
-            u64::from(pin), &mut raw, &mut error) };
+        let status = unsafe {
+            (self.api().prepare_program)(vehicle_path, pin_thread, &mut raw, &mut error)
+        };
         self.finish(status, error)?;
-        if raw.is_null() { return Err(Error::contract("program success omitted handle")); }
-        Ok(Program(Rc::new(ProgramInner { raw, engine: self.clone() })))
+
+        if raw.is_null() {
+            return Err(Error::contract("program success omitted handle"));
+        }
+
+        let program = ProgramInner { raw, engine: self.clone() };
+        Ok(Program(Rc::new(program)))
     }
 }

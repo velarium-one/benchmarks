@@ -13,6 +13,7 @@ cargo test -p benchmarks --test correctness
 cargo run --release -p benchmarks --bin bench -- list
 cargo run --release -p benchmarks --bin bench -- correctness lz4
 cargo run --release -p benchmarks --bin bench -- bench lz4 --warmups 2 --samples 10 --json results.json
+cargo run --release -p benchmarks --bin bench -- bench lz4 -O3 --json results-o3.json
 ```
 
 The discovered `rstest` cases are readable compile → prepare program → create session → prepare
@@ -83,7 +84,7 @@ All resources/input/expectations are preloaded outside timing. The optional `[re
 map pins stock resource identities: update or remove the corresponding pin deliberately when
 tinkering with an input. Keep an independently established expectation if claiming correctness.
 
-Public tests use named rstest cases generated from entry-local fixture paths.
+Public tests use rstest's `#[files]` discovery over entry-local fixture paths, with path-derived names.
 The build script watches the guest tree, so adding/removing fixtures refreshes test cases under
 ordinary Cargo commands. Large tests still have the compilation cost described below; use a narrow
 test filter or entry selector when experimenting.
@@ -97,6 +98,11 @@ Every sample must match its supplied expectation before it enters the report. Wi
 expectation, the report says `unchecked output` and is not independent correctness evidence. Native timings
 come from inside each worker, not its process startup or pipe transfer. Counted/uncounted Vehicle
 order alternates; reset, preloading, compilation and output checks are outside invocation timing.
+
+Use `-O0`, `-O2` or `-O3` to select GCC optimization for both Vehicle arms; the default is `-O2`.
+Supply at most one optimization flag, before or after the entry selector. Native workers keep
+their Rust release settings, and correctness commands/tests remain on `-O2`. Console output and
+the JSON `vehicle_optimization` field record the selected level; Vehicle filenames include it too.
 
 For mean invocation times `T`, the percentages are `100 * T_native / T_vehicle`: 100% means
 equal throughput. Counted frequency is total counted instructions / counted seconds. Uncounted

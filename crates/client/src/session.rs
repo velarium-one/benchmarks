@@ -14,29 +14,47 @@ pub(crate) struct SessionInner {
 
 impl Program {
     pub fn create_session(&self, gmem_capacity: u64) -> Result<Session> {
+        let engine = &self.0.engine;
         let mut raw = ptr::null_mut();
         let mut error = ptr::null_mut();
-        let engine = &self.0.engine;
         let status = unsafe { (engine.api().create_session)(self.0.raw, gmem_capacity, &mut raw, &mut error) };
         engine.finish(status, error)?;
-        if raw.is_null() { return Err(Error::contract("session success omitted handle")); }
-        Ok(Session(Rc::new(SessionInner { raw, program: self.clone(), accessing: Cell::new(false) })))
+
+        if raw.is_null() {
+            return Err(Error::contract("session success omitted handle"));
+        }
+
+        let session = SessionInner {
+            raw,
+            program: self.clone(),
+            accessing: Cell::new(false),
+        };
+        Ok(Session(Rc::new(session)))
     }
 }
 
 impl Session {
-    pub(crate) fn engine(&self) -> &Engine { &self.0.program.0.engine }
+    pub(crate) fn engine(&self) -> &Engine {
+        &self.0.program.0.engine
+    }
+
     pub(crate) fn check_access(&self) -> Result<()> {
-        if self.0.accessing.get() { Err(Error::contract("session results are currently borrowed")) } else { Ok(()) }
+        if self.0.accessing.get() {
+            return Err(Error::contract("session results are currently borrowed"));
+        }
+
+        Ok(())
     }
 }
 
 impl Drop for SessionInner {
     fn drop(&mut self) {
         assert!(!self.accessing.get(), "result access retains its session");
-        let mut error = ptr::null_mut();
+
         let engine = &self.program.0.engine;
+        let mut error = ptr::null_mut();
         let status = unsafe { (engine.api().release_session)(&mut self.raw, &mut error) };
+
         engine.finish(status, error).expect("safe Session release invariant");
     }
 }

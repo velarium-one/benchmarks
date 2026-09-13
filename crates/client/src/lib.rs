@@ -53,7 +53,9 @@ struct EngineInner {
 
 impl Engine {
     /// Exact build-owned engine path, also useful for provenance and direct launch.
-    pub fn acquired_path() -> &'static Path { Path::new(env!("VLR_ENGINE_PATH")) }
+    pub fn acquired_path() -> &'static Path {
+        Path::new(env!("VLR_ENGINE_PATH"))
+    }
     /// Loads the trusted engine selected by this client's build; no ambient path search is used.
     pub fn acquired() -> std::result::Result<Self, LoadError> {
         unsafe { Self::load(Self::acquired_path()) }
@@ -69,12 +71,14 @@ impl Engine {
         if !path.is_absolute() {
             return Err(LoadError::RelativePath(path.to_owned()));
         }
+
         // Linux policy: Vehicles bind runtime support from this retained engine's global scope.
         // Program admission rejects an earlier engine/executable that owns those symbols.
-        let library: Library = unsafe { libloading::os::unix::Library::open(Some(path),
-            libloading::os::unix::RTLD_NOW | libloading::os::unix::RTLD_GLOBAL) }
+        let loading_policy = libloading::os::unix::RTLD_NOW | libloading::os::unix::RTLD_GLOBAL;
+        let library = unsafe { libloading::os::unix::Library::open(Some(path), loading_policy) }
             .map(Library::from)
             .map_err(|source| LoadError::Library { path: path.to_owned(), source })?;
+
         let get_api = unsafe { library.get::<GetApi>(b"vlrts_get_api\0") }
             .map_err(LoadError::MissingBootstrap)?;
 
@@ -86,17 +90,26 @@ impl Engine {
             BOOTSTRAP_REVISION_MISMATCH => return Err(LoadError::RevisionMismatch),
             other => return Err(LoadError::BootstrapStatus(other)),
         }
+
+        // Admit the table, then retain it with the library that supplies its code and storage.
         let api = NonNull::new(output.cast::<RuntimeApi>().cast_mut())
             .ok_or(LoadError::MissingTable)?;
         if !api.as_ptr().is_aligned() {
             return Err(LoadError::MisalignedTable);
         }
+
         // invariant: a successful trusted bootstrap supplied a valid matching-layout table.
         let table_revision = unsafe { api.as_ref().abi_revision };
         if table_revision != ABI_REVISION {
             return Err(LoadError::TableRevision(table_revision));
         }
-        Ok(Self(Rc::new(EngineInner { api, _library: library, _calling_thread: PhantomData })))
+
+        let engine = EngineInner {
+            api,
+            _library: library,
+            _calling_thread: PhantomData,
+        };
+        Ok(Self(Rc::new(engine)))
     }
 
     pub fn abi_revision(&self) -> u64 {
@@ -104,5 +117,7 @@ impl Engine {
         self.api().abi_revision
     }
 
-    fn api(&self) -> &RuntimeApi { unsafe { self.0.api.as_ref() } }
+    fn api(&self) -> &RuntimeApi {
+        unsafe { self.0.api.as_ref() }
+    }
 }

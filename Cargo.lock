@@ -16,7 +16,6 @@ name = "benchmarks"
 version = "0.1.0"
 dependencies = [
  "client",
- "glob",
  "guest-kit",
  "rstest",
  "serde",
