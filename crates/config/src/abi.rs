@@ -42,18 +42,30 @@ impl From<String> for AbiSignalId {
     }
 }
 
+/// Identifies a parameter within an ABI signal.
+///
+/// Different signals may use the same parameter identifier. [`AbiParamRef`] combines it
+/// with the signal's identity to refer to one declared parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct AbiParamId(pub u16);
 
+/// Defines how ABI calls reach the host.
+///
+/// This selects the call mechanism. The host handler is supplied separately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum AbiTransport {
+    /// Calls the host handler through the Vehicle's foreign-function interface (FFI).
     GenericHostFfi,
 }
 
+/// Defines the source of a value written to a guest register by an ABI operation.
+///
+/// Used in [`AbiWriteDefinition`], which specifies the destination register.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum AbiWriteValue {
+    /// The result word returned by the host handler.
     HostReturnWord,
 }
 
@@ -67,11 +79,18 @@ pub enum AbiEntryValue {
     GuestHeapLength,
 }
 
-/// Paired architectural-register carriers for the layout-owned guest heap.
+/// Defines which guest registers receive the heap's base address and byte length.
+///
+/// Both values are supplied before the guest's first instruction executes. The base is
+/// a guest address, not a host pointer. The guest can use this pair to initialize its allocator.
+///
+/// The registers must be distinct. Neither may be `x0` or the stack pointer (`x2`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbiGuestHeapRegisters {
+    /// The register that receives the heap's base address.
     base: RiscvRegister,
+    /// The register that receives the heap's byte length.
     length: RiscvRegister,
 }
 
@@ -85,10 +104,16 @@ impl AbiGuestHeapRegisters {
     }
 }
 
-/// Program-entry values declared by one RISC-V ABI.
+/// Declares the values supplied through guest registers at program entry.
+///
+/// These values are established before the guest's first instruction executes. They are
+/// available to startup code without an ABI call.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbiEntryContract {
+    /// The optional register pair for delivering the guest heap.
+    ///
+    /// `None` leaves heap delivery undeclared; it does not disable the heap.
     guest_heap: Option<AbiGuestHeapRegisters>,
 }
 
@@ -119,16 +144,27 @@ impl AbiEntryContract {
     }
 }
 
-/// [nb:core] Validated declarative ABI supplied to the RISC-V frontend.
-/// The declaration is program-independent. CFG construction binds it to concrete source
-/// instructions and publishes its entry contract before register analysis consumes either surface.
+/// Declares the ABI that a guest RISC-V program follows.
 ///
+/// This declaration tells the compiler the effects of ABI calls, such as, whether
+/// a call returns and what registers it writes.
+///
+/// The compiler uses ABI signals to identify guest instructions that request ABI operations. The
+/// signal describes the pattern that is applied to every instruction. Matched instructions are
+/// translated according to the declared behavior. One signal can serve several operations.
+///
+/// The ABI is constructed with [`RiscvAbi::builder`]. This only declares the ABI behaviour. The
+/// host handler is supplied separately.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "AbiDeclaration")]
 pub struct RiscvAbi {
+    /// The identity of this ABI.
     id: AbiDialectId,
+    /// The transport used for guest-to-host calls.
     transport: AbiTransport,
+    /// The ABI's program-entry contract.
     entry: AbiEntryContract,
+    /// The signals declared by this ABI.
     signals: Vec<AbiSignalDefinition>,
 }
 
@@ -223,21 +259,42 @@ impl RiscvAbiBuilder {
     }
 }
 
+/// Defines an ABI signal that identifies guest instructions requesting ABI operations.
+///
+/// The compiler checks each instruction against the signal's pattern. For a matching instruction,
+/// the signal's parameters and behaviour-selection rule determine how the compiler interprets it.
+/// One signal can serve several operations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbiSignalDefinition {
+    /// The signal's identity, unique within the owning ABI.
     pub id: AbiSignalId,
+    /// The instruction pattern that identifies this signal.
     pub pattern: AbiSignalPattern,
+    /// The parameters declared by this signal.
     pub params: Vec<AbiParamDefinition>,
+    /// The rule for selecting an operation for a matched instruction.
     pub behavior: AbiBehaviorSelectionDefinition,
 }
 
+/// Constructs an ABI signal.
+///
+/// The builder starts with a signal identity and an instruction pattern. Parameters are added
+/// with [`Self::param`], which defines where each parameter comes from and returns a reference
+/// to it. These references are used to define the signal's selector and operation behaviours.
+///
+/// [`Self::build`] completes the signal with its behaviour-selection rule. The resulting
+/// definition can be added to an ABI with [`RiscvAbiBuilder::signal`]. Validation happens when
+/// the complete ABI is built.
 #[derive(Debug, Clone)]
-/// Signal-scoped builder that mints opaque parameter references for behavior declarations.
 pub struct AbiSignalBuilder {
+    /// The identity of this signal within the ABI.
     id: AbiSignalId,
+    /// The instruction pattern that identifies this signal.
     pattern: AbiSignalPattern,
+    /// The parameters declared for this signal.
     params: Vec<AbiParamDefinition>,
+    /// The identifier assigned to the next declared parameter.
     next_param_id: u16,
 }
 
@@ -285,103 +342,228 @@ impl AbiSignalBuilder {
     }
 }
 
-/// Opaque signal-local reference to one ABI parameter declaration.
+/// A reference to a declared parameter in a signal. Can only be used within the signal that
+/// declares the parameter.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbiParamRef {
+    /// Signal that owns the parameter.
     signal: AbiSignalId,
+    /// The parameter within that signal.
     id: AbiParamId,
 }
 
+/// Declares a parameter of an ABI signal.
+///
+/// The signal's selector and operation definitions refer to this parameter through
+/// [`AbiParamRef`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbiParamDefinition {
+    /// The reference that identifies this parameter.
     pub reference: AbiParamRef,
+    /// The parameter's name, unique within the owning ABI signal.
     pub name: String,
+    /// The source of this parameter.
     pub source: AbiParamDefinitionSource,
 }
 
+/// Defines which guest instructions identify an ABI signal.
+///
+/// The pattern matches the instruction and its operands. It does not define the operation's
+/// behaviour or check values held in guest registers. Those are declared separately through
+/// the signal's parameters and behaviour-selection rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum AbiSignalPattern {
+    /// Matches an `ecall` instruction.
     Ecall,
+
+    /// Matches `csrrw rd, csr, rs1` with the specified CSR address and register conditions.
+    ///
+    /// Register conditions apply to the register numbers, not the values they hold.
     Csrrw {
+        /// The control and status register (CSR) address to match.
+        ///
+        /// Must be in the range `0x000..=0xfff`.
         csr: u16,
+        /// The constraint on the instruction's destination register.
         rd: RegisterMatcher,
+        /// The constraint on the instruction's source register.
         rs1: RegisterMatcher,
     },
 }
 
+/// A matching constraint on a register operand.
+///
+/// The constraint applies to the register number, not the value held in the register.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum RegisterMatcher {
+    /// Accepts any register, including `x0`.
     Any,
+    /// Accepts any register except `x0`.
     AnyNonZero,
+    /// Accepts only the specified register.
     Exact(RiscvRegister),
 }
 
+/// Defines where an ABI parameter comes from.
+///
+/// This is used by the compiler to wire the ABI parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum AbiParamDefinitionSource {
+    /// The value held in the specified guest register.
+    ///
+    /// Intended for cases where the ABI names registers that are not encoded in the instruction,
+    /// such as `ecall`.
     Register(RiscvRegister),
+
+    /// The value held in the register named by the instruction's `rs1` operand.
     OperandRs1Value,
+
+    /// The destination register named by the instruction's `rd` operand.
     OperandRdRegister,
+
+    /// A constant supplied by this ABI declaration, not extracted from the instruction.
     Immediate(u32),
+
+    /// The matched instruction's complete machine-code encoding.
     RawInstructionWord,
+
+    /// The guest address of the matched RISC-V instruction.
+    ///
+    /// This is not an address in the compiled native Vehicle.
     SourcePc,
 }
 
+/// Defines how an ABI selects an operation.
+///
+/// Use a selector table when one instruction, such as `ecall`, serves several operations. Use a
+/// fixed definition when the instruction always requests the same operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum AbiBehaviorSelectionDefinition {
+    /// Selects an operation by matching a guest register's value against provided cases.
     SelectorTable {
+        /// The parameter whose register holds the selector value.
+        ///
+        /// The parameter reference must refer to parameter declared by the owning ABI
+        /// signal.
+        /// Set the selector register to a constant. There must be no control-flow
+        /// instruction between that assignment and the ABI call.
+        ///
+        /// Example:
+        /// ```asm
+        /// li a7, 1
+        /// ecall
+        /// ```
         selector: AbiParamRef,
+        /// The cases available to this signal.
         cases: Vec<AbiSelectorCaseDefinition>,
+        /// The policy for selector values with no matching case.
         unknown_policy: AbiUnknownSelectorPolicy,
     },
+    /// Uses one operation definition for every match.
+    ///
+    /// Calls may request different client operations. Their compiler-visible
+    /// effects are the same, so the compiler does not need a selector to
+    /// distinguish them.
     Fixed(AbiBehaviorDefinition),
 }
 
+/// Describes one ABI operation.
+///
+/// Used in [`AbiBehaviorSelectionDefinition::SelectorTable`], which defines the selector register.
+/// Each case describes one supported value of the selector register.
+///
+/// For example: an ABI can use `a0 = 1; ecall;` to read input length. The case with selector `1`
+/// describes that operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbiSelectorCaseDefinition {
+    /// The value that selects this case.
+    ///
+    /// This is the value held in the selector register, not its register number.
+    /// Values must be unique within the containing selector table.
     pub selector: u32,
+    /// The definition of this case's operation.
+    ///
+    /// Parameter references must refer to parameters declared by the owning ABI
+    /// signal.
     pub behavior: AbiBehaviorDefinition,
 }
 
+/// Defines what happens when a selector value has no matching case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum AbiUnknownSelectorPolicy {
+    /// Rejects compilation of the guest program.
     Reject,
 }
 
+/// Declares the compiler-visible effects of an ABI operation.
+///
+/// The compiler uses this definition to preserve the operation's inputs, account for
+/// register writes, and determine whether guest execution continues.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbiBehaviorDefinition {
+    /// The ordered parameters that this operation receives.
     pub required_params: Vec<AbiParamRef>,
+    /// The guest register writes performed by this operation.
     pub writes: Vec<AbiWriteDefinition>,
+    /// The operation's effect on guest control flow.
     pub control: AbiControlDefinition,
 }
 
+/// Defines whether an ABI operation continues or ends Vehicle execution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum AbiControlDefinition {
+    /// Continues at the next guest instruction after the host call returns.
     Continue,
+
+    /// Calls the host handler, then ends Vehicle execution with a trap.
+    ///
+    /// The handler's result word is discarded.
     TerminatesTrap,
-    TerminatesComplete { output: AbiOutputDefinition },
+
+    /// Ends Vehicle execution successfully and publishes its output.
+    TerminatesComplete {
+        /// The definition of the completed execution's output.
+        output: AbiOutputDefinition,
+    },
 }
 
+/// Declares a guest register write performed by an ABI operation.
+///
+/// The value comes from the declared source and replaces the destination register's value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbiWriteDefinition {
+    /// The destination guest register.
+    ///
+    /// Must not be `x0`. Each register may appear only once in an operation's writes.
     pub dst: RiscvRegister,
+    /// The source of the value to write.
     pub value: AbiWriteValue,
 }
 
+/// Defines how the Vehicle publishes its output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum AbiOutputDefinition {
-    Slice { ptr: AbiParamRef, len: AbiParamRef },
+    /// Publishes a guest-memory slice as the output.
+    ///
+    /// Both parameters must appear in the operation's required parameters.
+    Slice {
+        /// The parameter that supplies the slice's guest address, not a host pointer.
+        ptr: AbiParamRef,
+        /// The parameter that supplies the slice's byte length.
+        len: AbiParamRef,
+    },
 }
 
 
