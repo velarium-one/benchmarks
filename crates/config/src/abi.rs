@@ -635,13 +635,8 @@ pub mod dialects {
     use super::*;
 
     /// Demo transport declaration; services are implemented by the client.
-    pub fn demo_dialect() -> RiscvAbi { transport_dialect("demo_dialect", "demo.ecall") }
-
-    /// Same transport contract with the private fixture's stable evidence identities.
-    pub fn test_dialect() -> RiscvAbi { transport_dialect("test_dialect", "test.ecall") }
-
-    fn transport_dialect(identity: &str, signal: &str) -> RiscvAbi {
-        let mut ecall = AbiSignalBuilder::new(signal, AbiSignalPattern::Ecall);
+    pub fn demo_dialect() -> RiscvAbi {
+        let mut ecall = AbiSignalBuilder::new("demo.ecall", AbiSignalPattern::Ecall);
         let selector = ecall.param(
             "selector",
             AbiParamDefinitionSource::Register(RiscvRegister(17)),
@@ -696,7 +691,7 @@ pub mod dialects {
             unknown_policy: AbiUnknownSelectorPolicy::Reject,
         });
 
-        RiscvAbi::builder(identity)
+        RiscvAbi::builder("demo_dialect")
             .transport(AbiTransport::GenericHostFfi)
             .guest_heap_registers(
                 RiscvRegister(10),
@@ -704,7 +699,7 @@ pub mod dialects {
             )
             .signal(signal)
             .build()
-            .expect("built-in test ABI declaration must be valid")
+            .expect("built-in demo ABI declaration must be valid")
     }
 
     fn selector_case_continue(

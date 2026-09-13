@@ -8,9 +8,9 @@ use crate::{abi::RiscvAbi, counters::{CounterConfig, CounterConfigError, validat
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RiscvLoweringMode {
     /// One native function per VIR function, with function-local dynamic routing.
+    #[default]
     Monolithic,
     /// One callable per natural region, including grounded regions; no subdivision.
-    #[default]
     SsaRegions,
 }
 
