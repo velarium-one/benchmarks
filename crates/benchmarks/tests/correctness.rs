@@ -17,10 +17,7 @@ fn correctness(
     let elf = build::guest(&entry)?;
     let engine = Engine::acquired()?;
 
-    let directory = benchmarks::root().join("target/vehicles");
-    std::fs::create_dir_all(&directory)?;
-
-    let vehicle_path = directory.join(format!("{}-test.so", entry.artifact_name()));
+    let vehicle_path = vehicle::product_path(&entry, false, Optimization::O2)?;
     let compilation = engine.compile_program(&elf.path, &vehicle::config(false, Optimization::O2), &vehicle_path)?;
 
     eprintln!(
@@ -29,7 +26,7 @@ fn correctness(
     );
 
     // Prepare execution storage and bind the client-owned fixture services for one invocation.
-    // The matching engine just compiled this trusted demo guest, including its buffer contract.
+    // The engine compiled or verified this trusted demo guest, including its buffer contract.
     let program = unsafe { engine.prepare_program(&vehicle_path)? };
     let session = program.create_session(vehicle::GMEM_CAPACITY)?;
 

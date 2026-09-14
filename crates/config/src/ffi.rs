@@ -116,6 +116,8 @@ pub struct CompilationRecord {
     pub vehicle_sha256: [u8; 32],
     pub frontend_ns: u64,
     pub lowering_ns: u64,
+    /// Time spent compiling and linking; zero when a matching native product is reused.
+    /// Compiler identity queries, cache lookup, hashing and publication are excluded.
     pub compiler_ns: u64,
 }
 

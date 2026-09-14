@@ -40,9 +40,21 @@ does not admit arbitrary native libraries safely or negotiate Vehicle versions.
 
 Compilation sends generated C directly to GCC, leaving no named C file or ordinary compiler
 source diagnostic. This is artifact privacy, not secrecy from an operator inspecting process
-memory or replacing the compiler. A failed compilation after target deletion leaves no stale
-Vehicle. If deletion itself fails,
-compilation stops and reports the error; the old file remains unchanged.
+memory or replacing the compiler. Before synthesis, the runtime retires the old output into
+temporary storage. After retirement, a failed request leaves no stale Vehicle at the selected path.
+If retirement itself fails, compilation stops and reports the error.
+
+Vehicle products live under `target/bin/<entry>/vehicle/`, with optimization/counting variants such
+as `O2-uncounted.so` and an adjacent `O2-uncounted.sha256`. Each request still runs frontend and C
+lowering. The runtime compares the generated C and compiler-request hashes, checks the actual
+binary hash, then reuses a match without compiling or linking. Missing or changed products rebuild.
+Correctness and the matching benchmark arm share a product. Delete either file to force a rebuild.
+The sidecar contains hashes only, not generated C. It guards against accidental edits; it is not
+toolchain attestation or protection against an operator deliberately replacing files.
+
+Reported `compiler_ns` is zero on reuse. It measures compile/link work only; compiler identity
+queries, cache lookup, hashing and publication are excluded. Frontend and lowering durations still
+describe the current request.
 
 The guest source workspace is excluded from ordinary host targets; explicit package/binary/target,
 locked Cargo builds own freshness. Its entries also produce native workers, which do not acquire
@@ -130,7 +142,10 @@ Full four-arm reports have been checked for both stock fixtures at O2 and O3, in
 expectation validation, raw samples and binary identities. They establish measurements for those
 builds; they do not establish execution of the current public rstest examples or a standalone release.
 The current integration checks cover tiny Vehicles, stock native oracles and dependency/profile
-edits without cleaning. Public rstest execution remains a separate acceptance item.
+edits without cleaning. Both stock public rstest cases also passed on 2026-09-14, cold and with native
+reuse: LZ4 took 9.94s/0.67s and WASM took 131.19s/28.44s. Both repeats reported zero GCC compilation
+time; frontend and lowering still run. These are integrated-checkout results, not standalone release
+acceptance.
 
 WASM preparation in the supplied O2 reports took about 123 seconds uncounted and 139 seconds counted,
 including frontend, lowering and GCC. An earlier validation attempt exceeded its 120-second GCC cap;

@@ -163,19 +163,19 @@ pub fn run(entry: &Entry, optimization: Optimization, warmups: usize, samples: u
     let environment = environment()?;
     let engine = Engine::acquired()?;
 
-    let directory = crate::root().join("target/vehicles");
-    std::fs::create_dir_all(&directory)?;
-
     // Prepare both Vehicle variants and retain their separate preparation evidence.
     let mut sessions = Vec::new();
     let mut vehicle_products = Vec::new();
 
     for counted in [false, true] {
         let counting_label = if counted { "counted" } else { "uncounted" };
-        eprintln!("compiling {} {counting_label} -{optimization:?}", entry.name());
+        eprintln!("preparing {} {counting_label} -{optimization:?}", entry.name());
 
-        let path = directory.join(format!("{}-{optimization:?}-{counting_label}.so", entry.artifact_name()));
+        let path = vehicle::product_path(entry, counted, optimization)?;
         let record = engine.compile_program(&guest.path, &vehicle::config(counted, optimization), &path)?;
+        if record.compiler_ns == 0 {
+            eprintln!("reused native product");
+        }
 
         let start = Instant::now();
         // Trusted matching product; no arbitrary native library admission is claimed.

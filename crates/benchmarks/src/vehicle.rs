@@ -5,6 +5,15 @@ use crate::{Result, cases::{Case, Entry}, provider::Provider, measurement::Sampl
 
 pub const GMEM_CAPACITY: u64 = 8 * 1024 * 1024;
 
+/// Shared product location for correctness and benchmark executions of the same variant.
+pub fn product_path(entry: &Entry, counted: bool, optimization: Optimization) -> Result<std::path::PathBuf> {
+    let directory = crate::root().join("target/bin").join(entry.artifact_name()).join("vehicle");
+    std::fs::create_dir_all(&directory)?;
+
+    let counting = if counted { "counted" } else { "uncounted" };
+    Ok(directory.join(format!("{optimization:?}-{counting}.so")))
+}
+
 pub fn config(counted: bool, optimization: Optimization) -> CompileConfig {
     let dialect = client::config::abi::dialects::demo_dialect();
     let counters = if counted {
@@ -55,13 +64,10 @@ pub fn correctness(entry: &Entry, case: &Case) -> Result<()> {
     let elf = crate::build::guest(entry)?;
     let engine = Engine::acquired()?;
 
-    let directory = crate::root().join("target/vehicles");
-    std::fs::create_dir_all(&directory)?;
-
-    let path = directory.join(format!("{}-correctness.so", entry.artifact_name()));
+    let path = product_path(entry, false, Optimization::O2)?;
     engine.compile_program(&elf.path, &config(false, Optimization::O2), &path)?;
 
-    // Only the trusted artifact just compiled with this engine is admitted.
+    // Only the trusted artifact compiled or verified for this request is admitted.
     let program = unsafe { engine.prepare_program(&path)? };
     let session = program.create_session(GMEM_CAPACITY)?;
 
