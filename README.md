@@ -5,6 +5,11 @@ standalone engine (`libvlrts.so`). Supported host: x86_64 GNU/Linux with GCC and
 The guest target is `riscv32i-unknown-none-elf`; the second native target is
 `i686-unknown-linux-musl`. Install those Rust targets before running the demo.
 
+The locally inspected engine requires glibc 2.39 symbols, `libgcc_s.so.1`, and the x86_64 GNU
+dynamic loader. It cannot load on Debian 12's older glibc. These are requirements of that binary,
+not a tested minimum distribution or kernel for future releases. GCC and its linker remain
+external build dependencies; the engine is not a dependency-free shared library.
+
 From this workspace:
 
 ```sh
@@ -35,13 +40,15 @@ does not admit arbitrary native libraries safely or negotiate Vehicle versions.
 
 Compilation sends generated C directly to GCC, leaving no named C file or ordinary compiler
 source diagnostic. This is artifact privacy, not secrecy from an operator inspecting process
-memory or replacing the compiler. Unexpected internal panic diagnostics are not yet covered by
-the source-safe error policy. A failed compilation after target deletion leaves no stale Vehicle.
+memory or replacing the compiler. A failed compilation after target deletion leaves no stale
+Vehicle. If deletion itself fails,
+compilation stops and reports the error; the old file remains unchanged.
 
 The guest source workspace is excluded from ordinary host targets; explicit package/binary/target,
 locked Cargo builds own freshness. Its entries also produce native workers, which do not acquire
-the engine. Original project-code licensing and release distribution are still pending owner
-decisions; no publication-readiness claim is made here.
+the engine. Evaluation-only licensing is intended for the original project code and engine;
+final terms and release distribution are not yet approved. Third-party components retain their
+own licenses. No publication-readiness claim is made here.
 
 ## Copy An Entry And Experiment
 
@@ -119,9 +126,14 @@ SIMD and libc allocators differ from the guest's bump allocator; native copy/all
 projection and ordinary input cleanup are timed. Guest reclamation occurs during untimed reset.
 Pinning is disabled for all arms. No performance threshold is a correctness assertion.
 
-Validation before the entry reorganization: LZ4 public execution passed; WASM O2 exceeded a
-120-second GCC preparation budget. The new cross-target entry path is checked with tiny Vehicles
-and stock native oracles. Large Vehicles have not been rerun with the new entry/result code, and
-four-arm performance evidence is not yet accepted.
-The runner does not impose that development-validation timeout itself. Large reruns need a deliberate
-budget; do not mistake a successful build or arithmetic tests for measured-demo acceptance.
+Full four-arm reports have been checked for both stock fixtures at O2 and O3, including independent
+expectation validation, raw samples and binary identities. They establish measurements for those
+builds; they do not establish execution of the current public rstest examples or a standalone release.
+The current integration checks cover tiny Vehicles, stock native oracles and dependency/profile
+edits without cleaning. Public rstest execution remains a separate acceptance item.
+
+WASM preparation in the supplied O2 reports took about 123 seconds uncounted and 139 seconds counted,
+including frontend, lowering and GCC. An earlier validation attempt exceeded its 120-second GCC cap;
+that stopped attempt is not a failure of the later measured runs. The runner itself imposes no such
+timeout. Allow for compilation cost when selecting cases; build success alone is not correctness
+or benchmark evidence.
