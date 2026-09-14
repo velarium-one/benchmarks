@@ -2,6 +2,7 @@
 name = "client"
 version = "0.1.0"
 edition = "2024"
+license = "Apache-2.0"
 publish = false
 
 [dependencies]
@@ -11,8 +12,3 @@ thiserror = "1"
 
 [build-dependencies]
 config = { path = "../config" }
-flate2 = "1"
-sha2 = "0.10"
-tar = { version = "0.4", default-features = false }
-tempfile = "3"
-ureq = { version = "3", default-features = false, features = ["rustls"] }

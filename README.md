@@ -74,7 +74,8 @@ including unfavorable ones, with the machine details and JSON report. We'd like 
 For the full comparison, use x86_64 GNU/Linux with glibc 2.39 or newer, GCC, Rust nightly and the
 `riscv32i-unknown-none-elf` and `i686-unknown-linux-musl` Rust targets.
 
-Ordinary Cargo commands download the pinned, precompiled engine automatically.
+Ordinary Cargo commands download the pinned, precompiled engine automatically, using `sh`, `curl`,
+`sha256sum`, `tar`/`gzip` and `mktemp`.
 
 ```sh
 cargo run --release --bin bench -- list
@@ -99,3 +100,10 @@ The script creates `guest/my_workload` with one entry, `src/bin/main`. Pass an o
 argument to choose another entry name. The starter adds two inputs; replace it with your workload
 in `main.rs`. Its adjacent `fixture.toml` supplies the inputs and expected output and explains
 the available fields in comments. No separate native implementation or harness registration is needed.
+
+## License
+
+Original non-engine code and documentation are licensed under [Apache-2.0](LICENSE).
+The precompiled engine uses the [Velarium Engine Evaluation License 1.0](LICENSE-ENGINE.md):
+evaluation and published benchmarks are permitted; production use and reverse engineering are
+restricted. Third-party components and assets retain their own licenses.

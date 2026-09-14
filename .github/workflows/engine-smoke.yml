@@ -44,6 +44,7 @@ jobs:
           rustup default nightly
           rustup target add riscv32i-unknown-none-elf
           gcc --version
+          command -v sh curl sha256sum tar gzip mktemp
           test "$(rustc -vV | sed -n 's/^host: //p')" = '${{ matrix.target }}'
           mkdir -p smoke-evidence
           {
@@ -70,7 +71,7 @@ jobs:
           set -euo pipefail
           mkdir -p smoke-evidence
           if test -d target/release/build; then
-            mapfile -t engines < <(find target/release/build -type f -path '*/out/engine/libvlrts-*.so')
+            mapfile -t engines < <(find target/release/build -type f -path '*/out/engine/libvlrts.so')
           else
             engines=()
           fi

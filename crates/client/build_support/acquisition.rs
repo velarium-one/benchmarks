@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const MARKER: &str = ".velarium-public-build";
-#[path = "release.rs"]
-pub mod release;
+#[path = "releases.rs"]
+pub mod releases;
 
 #[derive(Debug)]
 pub enum Source {
@@ -54,7 +54,7 @@ pub fn source(manifest: &Path) -> Result<Source, String> {
 /// [nb:entry] Acquires the selected engine without a release fallback after private failure.
 pub fn acquire(manifest: &Path, output: &Path, host: &str, target: &str) -> Result<PathBuf, String> {
     // Reject unsupported execution platforms before calling any source adapter.
-    if host != target || !release::TARGETS.contains(&target) {
+    if host != target || !releases::TARGETS.contains(&target) {
         return Err(format!("unsupported engine host/target: {host}/{target}; require native x64 or ARM64 GNU/Linux"));
     }
 
@@ -68,8 +68,20 @@ pub fn acquire(manifest: &Path, output: &Path, host: &str, target: &str) -> Resu
     let (marker, adapter) = match selected {
         Source::Private { marker, adapter } => (marker, adapter),
         Source::Release => {
-            let pin = release::pin(target, config::ffi::ABI_REVISION)?;
-            let artifact = release::stage(pin, &directory, |pin| release::download(&release::agent(), pin))?;
+            let pin = releases::pin(target, config::ffi::ABI_REVISION)?;
+            let artifact = directory.join("libvlrts.so");
+            if artifact.exists() {
+                fs::remove_file(&artifact).map_err(|error| error.to_string())?;
+            }
+
+            let status = Command::new("sh").arg(manifest.join("build_support/acquire.sh"))
+                .args([pin.url, pin.sha256]).arg(&directory)
+                .stdout(Stdio::inherit()).stderr(Stdio::inherit())
+                .status().map_err(|error| format!("cannot run engine installer: {error}"))?;
+            if !status.success() {
+                return Err(format!("engine installer failed: {status}"));
+            }
+
             println!("cargo:rerun-if-changed={}", artifact.display());
             return Ok(artifact);
         }

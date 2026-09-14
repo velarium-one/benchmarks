@@ -2,6 +2,9 @@
 members = ["common/kernel", "common/allocator", "common/support", "fib", "lz4", "wasm_parser"]
 resolver = "3"
 
+[workspace.package]
+license = "Apache-2.0"
+
 [profile.release]
 panic = "abort"
 lto = true
