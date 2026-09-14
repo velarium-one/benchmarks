@@ -14,6 +14,8 @@ the entry's published string without spaces or a trailing newline.
 - Source: [Canterbury Large Corpus](https://corpus.canterbury.ac.nz/descriptions/),
   [Project Gutenberg ebook 48](https://www.gutenberg.org/ebooks/48).
 
+lz4_flex 0.14.0 is MIT-licensed. Dependency license texts remain in the published crate sources.
+
 ## Reproduce The Evidence
 
 Run `python3 evidence.py` from this directory. The script uses only Python's standard library

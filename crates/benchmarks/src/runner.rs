@@ -276,13 +276,13 @@ pub fn run(entry: &Entry, optimization: Optimization, warmups: usize, samples: u
 pub fn print(report: &Report) {
     let comparison = &report.comparison;
 
-    println!("{} (-{:?}): Vehicle {:.2}% of host-native, {:.2}% of i686; counted {:.3} MHz; uncounted {:.3} MHz (derived); counting overhead {:+.2}%",
+    println!("{} (-{:?}): Guest {:.2}% of host-native, {:.2}% of i686; counted {:.3} GIPS; uncounted {:.3} GIPS; counting overhead {:+.2}%",
         report.entry.name(),
         report.vehicle_optimization,
         comparison.vehicle_percent_host,
         comparison.vehicle_percent_i686,
-        comparison.counted_hz / 1e6,
-        comparison.uncounted_hz_estimate / 1e6,
+        comparison.counted_hz / 1e9,
+        comparison.uncounted_hz_estimate / 1e9,
         comparison.counting_overhead_percent,
     );
     println!("validation: {}", report.validation);

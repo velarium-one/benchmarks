@@ -23,6 +23,7 @@ struct Declaration {
     expected: Option<String>,
     expected_src: Option<PathBuf>,
     input_src: Option<PathBuf>,
+    input_words: Option<Vec<u32>>,
     #[serde(default)]
     resources: BTreeMap<String, PathBuf>,
     #[serde(default)]
@@ -68,6 +69,9 @@ impl Case {
         if declaration.expected.is_some() && declaration.expected_src.is_some() {
             return Err("expected and expected-src cannot coexist".into());
         }
+        if declaration.input_words.is_some() && declaration.input_src.is_some() {
+            return Err("input-words and input-src cannot coexist".into());
+        }
         let directory = manifest.parent().ok_or("fixture has no directory")?;
 
         let expected_bytes = match (declaration.expected, declaration.expected_src) {
@@ -87,9 +91,12 @@ impl Case {
         }).transpose()?;
 
         // Snapshot all invocation inputs, validating any fixture-owned provenance constraints.
-        let input = match declaration.input_src {
-            Some(path) => std::fs::read(relative(directory, &path)?)?,
-            None => Vec::new(),
+        // Both declarations supply the same indexed byte input; words have explicit wire order.
+        let input = match (declaration.input_words, declaration.input_src) {
+            (Some(words), None) => words.into_iter().flat_map(u32::to_le_bytes).collect(),
+            (None, Some(path)) => std::fs::read(relative(directory, &path)?)?,
+            (None, None) => Vec::new(),
+            (Some(_), Some(_)) => unreachable!("mutual exclusion checked above"),
         };
         u32::try_from(input.len())?;
         let mut resources = BTreeMap::new();

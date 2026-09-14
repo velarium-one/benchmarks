@@ -1,0 +1,27 @@
+# The benchmark looks for fixture.toml beside each Cargo binary's main.rs to discover workloads.
+# This file supplies the program's inputs and defines its expected output.
+# The same program and fixture run on RISC-V and both native targets.
+
+# Indexed invocation input: u32 words encoded as little-endian bytes.
+# main.rs receives these through input_read_u32(0), input_read_u32(1), etc.
+# Alternatively, input-src = "input.bin" loads raw bytes from a file. Use only one form.
+input-words = [2, 3]
+
+# Expected output bytes, written as hexadecimal (case-insensitive).
+# The example returns 2 + 3 = 5 as one little-endian u32.
+expected = "05000000"
+
+# For text output, set expected-format = "string" and expected = "your exact text".
+# String comparison does not trim whitespace or trailing newlines.
+# expected-src = "expected.bin" can load an expectation file instead of expected.
+# Never set both expected and expected-src. Omit both to run without checking output;
+# the report then says "unchecked output". Build and execution failures still fail.
+
+# Optional named resources are loaded before timing; all paths are relative to this file.
+# The program requests the key ("data" here), not the filesystem path.
+# [resources]
+# data = "data.bin"
+
+# Optional resource hashes are checked before providing the bytes to the program.
+# [resource-sha256]
+# data = "<SHA-256 of data.bin>"

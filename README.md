@@ -1,188 +1,101 @@
 # Velarium benchmarks
 
-Public guest sources, inputs, independent expectations and a small client for the closed
-standalone engine (`libvlrts.so`). Engine acquisition accepts native x86_64 and ARM64 GNU/Linux
-with GCC and Rust nightly. ARM execution still requires the hosted smoke check; the four-arm
-benchmark comparison remains x86_64-only.
-The guest target is `riscv32i-unknown-none-elf`; the second native target is
-`i686-unknown-linux-musl`. Install those Rust targets before running the demo.
+Velarium is a RISC-V execution engine designed for zkVM workloads. Its goal is native-like
+performance, with instruction accounting and configurable execution traces. Rather than
+interpreting or transpiling instructions individually, it recovers the program's control flow and
+register data flow and recompiles it into native code. This repository lets you compare that
+execution with native builds of the same program.
 
-The locally inspected engine requires glibc 2.39 symbols, `libgcc_s.so.1`, and the x86_64 GNU
-dynamic loader. It cannot load on Debian 12's older glibc. These are requirements of that binary,
-not a tested minimum distribution or kernel for future releases. GCC and its linker remain
-external build dependencies; the engine is not a dependency-free shared library.
+## Available now and planned
 
-From this workspace:
+The benchmarks currently run RISC-V programs and optionally count executed guest instructions.
+The count provides an execution-progress measure, similar in purpose to timestamps or clocks in
+other zkVM implementations; it does not imply the same accounting rules.
+
+Fixtures:
+
+- **LZ4:** decompresses the 2.47 MB CIA World Factbook text and returns a digest and summary values.
+- **WASM parser:** parses a fixed, previously compiled version of itself: about 120 KB of WebAssembly,
+  146 function bodies and 42,834 operators.
+- **Fibonacci:** computes 100 million iterations of the wrapping `u32` recurrence, starting from
+  0 and 1.
+
+Planned additions:
+
+- **REVM fixture:** an EVM interpreter workload.
+- **Sparse traces:** records of selected events, such as guest memory reads/writes or ABI calls.
+- **Dense traces:** instruction-by-instruction execution records.
+
+## Results
+
+### AMD Ryzen 5 5600X
+
+O2, untraced.
+
+| Workload | % of native x64 throughput | % of native i686 throughput | Counted GIPS | Uncounted GIPS | Counting overhead |
+|---|---:|---:|---:|---:|---:|
+| LZ4 | 34.64% | 54.41% | 5.528 | 6.055 | +9.52% |
+| WASM parser | 41.23% | 57.77% | 3.758 | 3.942 | +4.90% |
+| Fibonacci | 97.11% | 100.24% | 22.796 | 22.465 | -1.45% |
+
+> [!note]
+> Fibonacci's small negative counting overhead is consistent with natural variation in wall-clock time.
+
+### Reading the numbers
+
+**% of** - compares uncounted guest throughput with native throughput; 100% means equal
+speed. Native x64 is the ordinary host baseline. Native i686 reduces the width mismatch with RV32,
+giving a more isolated view of the overhead. It does not isolate virtualization cost exactly:
+register availability, ABI, libraries and allocators also differ between these builds.
+
+**IPS** - guest RISC-V instructions per second; GIPS - billions of IPS. This is execution
+throughput; some teams call it "frequency". The compiler can use more efficient native
+instructions, and the CPU can execute multiple operations per cycle. GIPS can
+therefore exceed the CPU's clock rate in GHz.
+
+The uncounted run executes without instruction counting. The counted run adds that measurement.
+Uncounted IPS is derived from the counted run's instruction count and the uncounted run's elapsed
+time. Counting overhead is the change in execution time when counting is enabled.
+
+## Inspect it, change it, measure it
+
+The same workload source builds for RV32, native x64 and native i686. Stock fixtures have independent
+expected outputs, and every measured sample must match. Timings cover execution, not compilation,
+loading, input preloading, guest memory reset or output checking. Native allocation and ordinary
+input cleanup are timed; guest allocations are reclaimed by the untimed reset.
+
+The compiler/runtime engine is closed source and supplied precompiled. The workload sources,
+fixtures and measurement harness are here to inspect. **Don't take our fixtures or harness on trust**:
+change the inputs, check the timing boundaries and bring your own workloads. Publish your results,
+including unfavorable ones, with the machine details and JSON report. We'd like to see them too.
+
+## Run
+
+For the full comparison, use x86_64 GNU/Linux with glibc 2.39 or newer, GCC, Rust nightly and the
+`riscv32i-unknown-none-elf` and `i686-unknown-linux-musl` Rust targets.
+
+Ordinary Cargo commands download the pinned, precompiled engine automatically.
 
 ```sh
-cargo build
+cargo run --release --bin bench -- list
+cargo run --release --bin bench -- bench fib --json fib-results.json
+cargo run --release --bin bench -- bench lz4 --json lz4-results.json
+cargo run --release --bin bench -- bench wasm_parser --json wasm-results.json
 cargo test -p benchmarks --test correctness
-cargo run --release -p benchmarks --bin bench -- list
-cargo run --release -p benchmarks --bin bench -- correctness lz4
-cargo run --release -p benchmarks --bin bench -- correctness lz4 -O0
-cargo run --release -p benchmarks --bin bench -- bench lz4 --warmups 2 --samples 10 --json results.json
-cargo run --release -p benchmarks --bin bench -- bench lz4 -O3 --json results-o3.json
 ```
 
-The discovered `rstest` cases are readable compile → prepare program → create session → prepare
-invocation → invoke → compare examples. They use Monolithic lowering, GCC O2, no tracing or
-counters, and 8 MiB fresh guest memory. Each case compares the complete result with a separate
-committed expectation. See [provenance](guest/PROVENANCE.md) for input identities and notices.
+O2 is the default; pass `-O0` or `-O3` to choose another guest optimization level. The first run
+compiles the workload: allow several minutes for WASM. Matching compiled guest binaries are reused
+on subsequent runs, though frontend processing and lowering still run.
 
-In the private monorepo, ordinary Cargo commands build and stage the matching engine through
-the private adapter. An independent checkout selects an exact release pin for its native target
-and API revision. The production pin table is currently empty pending release publication: such
-a checkout reports `no published engine pin`, without a private-source fallback. The downloader
-and controlled acquisition tests do not make an unpublished release available.
-Compiled clients retain the exact acquired engine path; moving that engine requires rebuilding
-or explicitly loading another trusted matching engine.
-
-Release pins live in `crates/client/build_support/releases.rs`. Each identifies a direct HTTPS
-archive URL, its byte length and SHA-256, and the extracted library's separate length and SHA-256.
-Acquisition permits at most five HTTPS redirects and 120 seconds for the complete request, with a
-15-second connection timeout. It verifies the archive before bounded decoding, accepts only one
-regular `libvlrts.so`, then verifies and stages the library. No curl, tar executable, GitHub CLI or
-GitHub credentials are needed. Retained libraries are checked again when acquisition reruns;
-missing or modified bytes require a fresh download. A failed changed request cannot use its old
-invalid staged product.
-
-The client owns dialect services and preloads inputs. Callback guest buffers are trusted,
-accessible transport ranges, not arbitrary memory inspection; their raw pointers cannot escape
-the callback. Invalid pointers violate the unsafe contract. Traps and unsupported callbacks are
-process-fatal. Loading native engines/Vehicles requires trusted matching artifacts; this demo
-does not admit arbitrary native libraries safely or negotiate Vehicle versions.
-
-Compilation sends generated C directly to GCC, leaving no named C file or ordinary compiler
-source diagnostic. This is artifact privacy, not secrecy from an operator inspecting process
-memory or replacing the compiler. Before synthesis, the runtime retires the old output into
-temporary storage. After retirement, a failed request leaves no stale Vehicle at the selected path.
-If retirement itself fails, compilation stops and reports the error.
-
-Vehicle products live under `target/bin/<entry>/vehicle/`, with optimization/counting variants such
-as `O2-uncounted.so` and an adjacent `O2-uncounted.sha256`. Each request still runs frontend and C
-lowering. The runtime compares the generated C and compiler-request hashes, checks the actual
-binary hash, then reuses a match without compiling or linking. Missing or changed products rebuild.
-Correctness and the matching benchmark arm share a product. Delete either file to force a rebuild.
-The sidecar contains hashes only, not generated C. It guards against accidental edits; it is not
-toolchain attestation or protection against an operator deliberately replacing files.
-
-Reported `compiler_ns` is zero on reuse. It measures compile/link work only; compiler identity
-queries, cache lookup, hashing and publication are excluded. Frontend and lowering durations still
-describe the current request.
-
-The guest source workspace is excluded from ordinary host targets; explicit package/binary/target,
-locked Cargo builds own freshness. Its entries also produce native workers, which do not acquire
-the engine. Evaluation-only licensing is intended for the original project code and engine;
-final terms and release distribution are not yet approved. Third-party components retain their
-own licenses. No publication-readiness claim is made here.
-
-## Copy An Entry And Experiment
-
-`guest/common` contains allocator, kernel and cross-target support. `guest/lz4` and
-`guest/wasm_parser` contain reusable workload libraries. Their `src/bin/<entry>/` directories each
-contain a `main.rs`, `fixture.toml`, input files and independent expectations/provenance.
-
-Copy an entry directory under the same `src/bin`, choose a new directory name, and edit its `run`
-function or fixture. Cargo discovers the new binary; the demo discovers its adjacent fixture.
-No central registry or separate native implementation needs updating. `bench list` shows selectors;
-use `lz4/my_entry` for one entry, `lz4` for that family's entries, or `all` for every fixture.
-
-The same entry is compiled as RV32, x64 GNU and i686 musl. Its workload function receives resources
-and returns result bytes. Shared bootstrap supplies `_start` and guest completion on RV32, or
-`main` and native measurements on the native targets. Terminal output is not guest completion.
-LZ4 returns comma-separated decimal evidence as text; WASM returns its existing 88-byte record.
-LZ4 accepts a narrow single-block CLI frame profile without checksum verification; see its
-[fixture provenance](guest/lz4/src/bin/world_u32/PROVENANCE.md) for the exact command and limits.
-
-A fixture can contain:
-
-```toml
-expected-format = "string"
-expected = "1,2,3"
-
-[resources]
-"key/requested/by/the/entry" = "input.bin"
-```
-
-`bytes` is the default format. Inline `expected = "0dE4"` means bytes `0x0d, 0xe4`; case does not
-matter in hexadecimal digits. `string` uses exact UTF-8 equality: no trimming, extra newline,
-number interpretation or JSON normalization. Instead of inline `expected`, use
-`expected-src = "expected.bin"` for raw bytes, or a UTF-8 text file with string mode. Both fields
-together are an error; neither means unchecked output, explicitly labelled in tests and reports.
-Build/invocation failures still fail. There is no array or JSON comparison mode.
-
-All file paths are relative to `fixture.toml`. Resource keys are exact dialect keys, not paths
-opened during invocation. Optional `input-src` provides the separate indexed invocation input.
-All resources/input/expectations are preloaded outside timing. The optional `[resource-sha256]`
-map pins stock resource identities: update or remove the corresponding pin deliberately when
-tinkering with an input. Keep an independently established expectation if claiming correctness.
-
-Public tests use rstest's `#[files]` discovery over entry-local fixture paths, with path-derived names.
-The build script watches the guest tree, so adding/removing fixtures refreshes test cases under
-ordinary Cargo commands. Large tests still have the compilation cost described below; use a narrow
-test filter or entry selector when experimenting.
-
-## Measurements
-
-The `bench` executable is the single driver for listing, correctness and measurements; there is
-no separate Cargo benchmark target. Its `bench` subcommand runs measurements. Omit the entry selector to run all discovered
-cases. Each comparison has host-native, i686-native, uncounted Vehicle and counted Vehicle arms.
-Every sample must match its supplied expectation before it enters the report. Without an
-expectation, the report says `unchecked output` and is not independent correctness evidence. Native timings
-come from inside each worker, not its process startup or pipe transfer. Counted/uncounted Vehicle
-order alternates; reset, preloading, compilation and output checks are outside invocation timing.
-
-Use `-O0`, `-O2` or `-O3` to select GCC optimization for both Vehicle arms; the default is `-O2`.
-Supply at most one optimization flag, before or after the entry selector. Native workers keep
-their Rust release settings. The `correctness` command accepts the same flags and defaults to O2;
-the public rstest cases stay explicitly O2, untraced and uncounted. Console output and
-the JSON `vehicle_optimization` field record the selected level; Vehicle filenames include it too.
-
-For mean invocation times `T`, the percentages are `100 * T_native / T_vehicle`: 100% means
-equal throughput. Counted frequency is total counted instructions / counted seconds. Uncounted
-frequency is a derived estimate: the same instruction total / uncounted seconds, assuming identical
-guest work across matching inputs and equal sample counts. It is labelled `derived` in the console
-and `uncounted_hz_estimate` in JSON; raw uncounted samples still have no instruction count. Counting overhead
-is `100 * (T_counted / T_uncounted - 1)`, including negative observations. No counter from another
-invocation is attached to uncounted time. Timer overhead is reported separately, never subtracted.
-
-Console output includes the full raw report; `--json` writes that same record. It includes samples,
-stage durations, artifact/configuration/input hashes, actual acquired engine hash and ABI revision,
-target build arguments, CPU/affinity, compiler versions and timing exclusions. Native target-default
-SIMD and libc allocators differ from the guest's bump allocator; native copy/allocation, processing,
-projection and ordinary input cleanup are timed. Guest reclamation occurs during untimed reset.
-Pinning is disabled for all arms. No performance threshold is a correctness assertion.
-
-Full four-arm reports have been checked for both stock fixtures at O2 and O3, including independent
-expectation validation, raw samples and binary identities. They establish measurements for those
-builds; they do not establish execution of the current public rstest examples or a standalone release.
-The current integration checks cover tiny Vehicles, stock native oracles and dependency/profile
-edits without cleaning. Both stock public rstest cases also passed on 2026-09-14, cold and with native
-reuse: LZ4 took 9.94s/0.67s and WASM took 131.19s/28.44s. Both repeats reported zero GCC compilation
-time; frontend and lowering still run. These are integrated-checkout results, not standalone release
-acceptance.
-
-WASM preparation in the supplied O2 reports took about 123 seconds uncounted and 139 seconds counted,
-including frontend, lowering and GCC. An earlier validation attempt exceeded its 120-second GCC cap;
-that stopped attempt is not a failure of the later measured runs. The runner itself imposes no such
-timeout. Allow for compilation cost when selecting cases; build success alone is not correctness
-or benchmark evidence.
-
-## On-demand Engine Smoke
-
-The `Engine smoke` workflow runs only through `workflow_dispatch` against `main`. It tests the
-resolved public commit on `ubuntu-24.04` and `ubuntu-24.04-arm`, one job at a time. Each fresh
-checkout acquires its pinned engine, builds the RV32 LZ4 guest and runs:
+## Create a fixture
 
 ```sh
-cargo run --locked --release --jobs 1 --bin bench -- correctness lz4 -O0
+./new-fixture.sh my_workload
+cargo run --release --bin bench -- bench my_workload
 ```
 
-The workflow does not build private sources, run WASM, count instructions or build native comparison
-workers. It retains correctness logs, source revision, toolchain/runner details and the acquired
-engine hash/path and API revision. Public stock correctness remains O2; this small O0 run checks
-whether the engine can load, compile and execute on each architecture.
-
-The workflow must be present on the default branch and release pins/assets must be available
-before dispatch. No hosted result is claimed yet. The empty pin table currently prevents the
-workflow from acquiring an engine. Publishing the code or archives is a separate approval step.
+The script creates `guest/my_workload` with one entry, `src/bin/main`. Pass an optional second
+argument to choose another entry name. The starter adds two inputs; replace it with your workload
+in `main.rs`. Its adjacent `fixture.toml` supplies the inputs and expected output and explains
+the available fields in comments. No separate native implementation or harness registration is needed.

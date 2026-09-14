@@ -1,5 +1,5 @@
 [workspace]
-members = ["common/kernel", "common/allocator", "common/support", "lz4", "wasm_parser"]
+members = ["common/kernel", "common/allocator", "common/support", "fib", "lz4", "wasm_parser"]
 resolver = "3"
 
 [profile.release]
