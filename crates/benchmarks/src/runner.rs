@@ -296,6 +296,7 @@ pub fn cli(arguments: impl IntoIterator<Item = String>) -> Result<()> {
         List,
         Correctness {
             selector: String,
+            optimization: Optimization,
         },
         Benchmark {
             selector: String,
@@ -318,18 +319,7 @@ pub fn cli(arguments: impl IntoIterator<Item = String>) -> Result<()> {
 
             Command::List
         }
-        "correctness" => {
-            let selector = arguments
-                .next()
-                .ok_or("correctness requires a family or family/entry")?;
-
-            if arguments.next().is_some() {
-                return Err("unexpected correctness arguments".into());
-            }
-
-            Command::Correctness { selector }
-        }
-        "bench" => {
+        "correctness" | "bench" => {
             let mut selector = None;
             let mut optimization = None;
             let mut warmups = 2;
@@ -350,13 +340,13 @@ pub fn cli(arguments: impl IntoIterator<Item = String>) -> Result<()> {
                             _ => unreachable!("optimization flag matched above"),
                         });
                     }
-                    "--warmups" => {
+                    "--warmups" if command_name == "bench" => {
                         warmups = arguments.next().ok_or("missing warmups")?.parse()?;
                     }
-                    "--samples" => {
+                    "--samples" if command_name == "bench" => {
                         samples = arguments.next().ok_or("missing samples")?.parse()?;
                     }
-                    "--json" => {
+                    "--json" if command_name == "bench" => {
                         let path = arguments.next().ok_or("missing JSON path")?;
                         json_path = Some(PathBuf::from(path));
                     }
@@ -373,17 +363,23 @@ pub fn cli(arguments: impl IntoIterator<Item = String>) -> Result<()> {
                 return Err("sample count must be positive".into());
             }
 
-            Command::Benchmark {
-                selector: selector.unwrap_or_else(|| "all".into()),
-                optimization: optimization.unwrap_or(Optimization::O2),
-                warmups,
-                samples,
-                json_path,
+            let optimization = optimization.unwrap_or(Optimization::O2);
+            if command_name == "correctness" {
+                let selector = selector.ok_or("correctness requires a family or family/entry")?;
+                Command::Correctness { selector, optimization }
+            } else {
+                Command::Benchmark {
+                    selector: selector.unwrap_or_else(|| "all".into()),
+                    optimization,
+                    warmups,
+                    samples,
+                    json_path,
+                }
             }
         }
         _ => {
             return Err(concat!(
-                "usage: bench list | correctness <family[/entry]> | ",
+                "usage: bench list | correctness <family[/entry]> [-O0|-O2|-O3] | ",
                 "bench [family[/entry]|all] [-O0|-O2|-O3] [--warmups N] [--samples N] [--json PATH]"
             ).into());
         }
@@ -398,14 +394,14 @@ pub fn cli(arguments: impl IntoIterator<Item = String>) -> Result<()> {
                 println!("{}", entry.name());
             }
         }
-        Command::Correctness { selector } => {
+        Command::Correctness { selector, optimization } => {
             let entries = cases::select(&selector)?;
 
             for entry in entries {
                 let case = Case::load(&entry.fixture)?;
-                vehicle::correctness(&entry, &case)?;
+                vehicle::correctness(&entry, &case, optimization)?;
 
-                println!("{}: {}", entry.name(), case.validation_label());
+                println!("{} (-{optimization:?}): {}", entry.name(), case.validation_label());
             }
         }
         Command::Benchmark {

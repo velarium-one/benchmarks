@@ -1,0 +1,92 @@
+name: Engine smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  correctness:
+    name: LZ4 O0 (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    env:
+      CARGO_BUILD_JOBS: '1'
+    steps:
+      - name: Check out the dispatched public revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check source selection and prepare tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          directory="$PWD"
+          while true; do
+            test ! -e "$directory/.velarium-public-build"
+            test "$directory" != / || break
+            directory=$(dirname "$directory")
+          done
+          rustup toolchain install nightly --profile minimal
+          rustup default nightly
+          rustup target add riscv32i-unknown-none-elf
+          gcc --version
+          test "$(rustc -vV | sed -n 's/^host: //p')" = '${{ matrix.target }}'
+          mkdir -p smoke-evidence
+          {
+            git rev-parse HEAD
+            rustc -vV
+            gcc --version
+            uname -a
+            getconf GNU_LIBC_VERSION
+            getconf PAGESIZE
+            lscpu
+          } > smoke-evidence/environment.txt
+
+      - name: Acquire the pinned engine and check LZ4
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --locked --release --jobs 1 --bin bench -- correctness lz4 -O0 \
+            2>&1 | tee smoke-evidence/correctness.log
+
+      - name: Record the acquired engine identity
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-evidence
+          if test -d target/release/build; then
+            mapfile -t engines < <(find target/release/build -type f -path '*/out/engine/libvlrts-*.so')
+          else
+            engines=()
+          fi
+          if test "${#engines[@]}" -ne 1; then
+            echo 'No unique acquired engine; inspect the failed build log.' > smoke-evidence/engine.txt
+            exit 1
+          fi
+          sha256sum "${engines[0]}" > smoke-evidence/engine.txt
+          printf '%s\n' "${engines[0]}" >> smoke-evidence/engine.txt
+          sed -n '/^pub const ABI_REVISION:/p' crates/config/src/ffi.rs >> smoke-evidence/engine.txt
+
+      - name: Retain smoke evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: engine-smoke-${{ matrix.target }}-${{ github.sha }}
+          path: smoke-evidence/
+          if-no-files-found: error
+          retention-days: 14

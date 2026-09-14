@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const MARKER: &str = ".velarium-public-build";
-const TARGET: &str = "x86_64-unknown-linux-gnu";
+#[path = "release.rs"]
+pub mod release;
 
 #[derive(Debug)]
 pub enum Source {
@@ -53,30 +54,32 @@ pub fn source(manifest: &Path) -> Result<Source, String> {
 /// [nb:entry] Acquires the selected engine without a release fallback after private failure.
 pub fn acquire(manifest: &Path, output: &Path, host: &str, target: &str) -> Result<PathBuf, String> {
     // Reject unsupported execution platforms before calling any source adapter.
-    if host != TARGET || target != TARGET {
-        return Err(format!("unsupported engine host/target: {host}/{target}; required {TARGET}"));
+    if host != target || !release::TARGETS.contains(&target) {
+        return Err(format!("unsupported engine host/target: {host}/{target}; require native x64 or ARM64 GNU/Linux"));
     }
 
-    let (marker, adapter) = match source(manifest)? {
+    // Source selection precedes acquisition. Both sources own one exact staged product.
+    println!("cargo:rerun-if-changed={}", manifest.join("build.rs").display());
+    println!("cargo:rerun-if-changed={}", manifest.join("build_support").display());
+    let selected = source(manifest)?;
+    let output = output.canonicalize().map_err(|error| error.to_string())?;
+    let directory = output.join("engine");
+
+    let (marker, adapter) = match selected {
         Source::Private { marker, adapter } => (marker, adapter),
         Source::Release => {
-            return Err(format!(
-                "release acquisition not implemented (ABI {}, target {target})",
-                config::ffi::ABI_REVISION,
-            ));
+            let pin = release::pin(target, config::ffi::ABI_REVISION)?;
+            let artifact = release::stage(pin, &directory, |pin| release::download(&release::agent(), pin))?;
+            println!("cargo:rerun-if-changed={}", artifact.display());
+            return Ok(artifact);
         }
     };
 
     // Track source selection alongside this public acquisition implementation.
     println!("cargo:rerun-if-changed={}", marker.display());
     println!("cargo:rerun-if-changed={}", adapter.display());
-    // Explicit watches disable Cargo's package-wide default; retain our own implementation inputs.
-    println!("cargo:rerun-if-changed={}", manifest.join("build.rs").display());
-    println!("cargo:rerun-if-changed={}", manifest.join("build_support").display());
 
     // Bound all acquisition output to Cargo's provided directory and invalidate stale selection.
-    let output = output.canonicalize().map_err(|error| error.to_string())?;
-    let directory = output.join("engine");
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
 
     let artifact = directory.join(format!("libvlrts-local-abi{}-{target}.so", config::ffi::ABI_REVISION));

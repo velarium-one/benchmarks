@@ -1,7 +1,9 @@
 # Velarium benchmarks
 
 Public guest sources, inputs, independent expectations and a small client for the closed
-standalone engine (`libvlrts.so`). Supported host: x86_64 GNU/Linux with GCC and Rust nightly.
+standalone engine (`libvlrts.so`). Engine acquisition accepts native x86_64 and ARM64 GNU/Linux
+with GCC and Rust nightly. ARM execution still requires the hosted smoke check; the four-arm
+benchmark comparison remains x86_64-only.
 The guest target is `riscv32i-unknown-none-elf`; the second native target is
 `i686-unknown-linux-musl`. Install those Rust targets before running the demo.
 
@@ -17,6 +19,7 @@ cargo build
 cargo test -p benchmarks --test correctness
 cargo run --release -p benchmarks --bin bench -- list
 cargo run --release -p benchmarks --bin bench -- correctness lz4
+cargo run --release -p benchmarks --bin bench -- correctness lz4 -O0
 cargo run --release -p benchmarks --bin bench -- bench lz4 --warmups 2 --samples 10 --json results.json
 cargo run --release -p benchmarks --bin bench -- bench lz4 -O3 --json results-o3.json
 ```
@@ -27,10 +30,21 @@ counters, and 8 MiB fresh guest memory. Each case compares the complete result w
 committed expectation. See [provenance](guest/PROVENANCE.md) for input identities and notices.
 
 In the private monorepo, ordinary Cargo commands build and stage the matching engine through
-the private adapter. Standalone release downloading is deliberately not implemented yet:
-an independent checkout reports that acquisition failure, without a private-source fallback.
+the private adapter. An independent checkout selects an exact release pin for its native target
+and API revision. The production pin table is currently empty pending release publication: such
+a checkout reports `no published engine pin`, without a private-source fallback. The downloader
+and controlled acquisition tests do not make an unpublished release available.
 Compiled clients retain the exact acquired engine path; moving that engine requires rebuilding
 or explicitly loading another trusted matching engine.
+
+Release pins live in `crates/client/build_support/releases.rs`. Each identifies a direct HTTPS
+archive URL, its byte length and SHA-256, and the extracted library's separate length and SHA-256.
+Acquisition permits at most five HTTPS redirects and 120 seconds for the complete request, with a
+15-second connection timeout. It verifies the archive before bounded decoding, accepts only one
+regular `libvlrts.so`, then verifies and stages the library. No curl, tar executable, GitHub CLI or
+GitHub credentials are needed. Retained libraries are checked again when acquisition reruns;
+missing or modified bytes require a fresh download. A failed changed request cannot use its old
+invalid staged product.
 
 The client owns dialect services and preloads inputs. Callback guest buffers are trusted,
 accessible transport ranges, not arbitrary memory inspection; their raw pointers cannot escape
@@ -120,7 +134,8 @@ order alternates; reset, preloading, compilation and output checks are outside i
 
 Use `-O0`, `-O2` or `-O3` to select GCC optimization for both Vehicle arms; the default is `-O2`.
 Supply at most one optimization flag, before or after the entry selector. Native workers keep
-their Rust release settings, and correctness commands/tests remain on `-O2`. Console output and
+their Rust release settings. The `correctness` command accepts the same flags and defaults to O2;
+the public rstest cases stay explicitly O2, untraced and uncounted. Console output and
 the JSON `vehicle_optimization` field record the selected level; Vehicle filenames include it too.
 
 For mean invocation times `T`, the percentages are `100 * T_native / T_vehicle`: 100% means
@@ -152,3 +167,22 @@ including frontend, lowering and GCC. An earlier validation attempt exceeded its
 that stopped attempt is not a failure of the later measured runs. The runner itself imposes no such
 timeout. Allow for compilation cost when selecting cases; build success alone is not correctness
 or benchmark evidence.
+
+## On-demand Engine Smoke
+
+The `Engine smoke` workflow runs only through `workflow_dispatch` against `main`. It tests the
+resolved public commit on `ubuntu-24.04` and `ubuntu-24.04-arm`, one job at a time. Each fresh
+checkout acquires its pinned engine, builds the RV32 LZ4 guest and runs:
+
+```sh
+cargo run --locked --release --jobs 1 --bin bench -- correctness lz4 -O0
+```
+
+The workflow does not build private sources, run WASM, count instructions or build native comparison
+workers. It retains correctness logs, source revision, toolchain/runner details and the acquired
+engine hash/path and API revision. Public stock correctness remains O2; this small O0 run checks
+whether the engine can load, compile and execute on each architecture.
+
+The workflow must be present on the default branch and release pins/assets must be available
+before dispatch. No hosted result is claimed yet. The empty pin table currently prevents the
+workflow from acquiring an engine. Publishing the code or archives is a separate approval step.

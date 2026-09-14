@@ -60,12 +60,15 @@ pub fn sample(session: &Session, case: &Case, counted: bool) -> Result<Sample> {
     Ok(Sample { elapsed_ns, instructions })
 }
 
-pub fn correctness(entry: &Entry, case: &Case) -> Result<()> {
+pub fn correctness(entry: &Entry, case: &Case, optimization: Optimization) -> Result<()> {
     let elf = crate::build::guest(entry)?;
     let engine = Engine::acquired()?;
 
-    let path = product_path(entry, false, Optimization::O2)?;
-    engine.compile_program(&elf.path, &config(false, Optimization::O2), &path)?;
+    let path = product_path(entry, false, optimization)?;
+    let compilation = engine.compile_program(&elf.path, &config(false, optimization), &path)?;
+
+    eprintln!("{} (-{optimization:?}) preparation: frontend={}ns lowering={}ns compiler={}ns",
+        entry.name(), compilation.frontend_ns, compilation.lowering_ns, compilation.compiler_ns);
 
     // Only the trusted artifact compiled or verified for this request is admitted.
     let program = unsafe { engine.prepare_program(&path)? };
