@@ -9,6 +9,8 @@ optimized native code.
 
 This repository lets you compare that execution with native builds of the same program.
 
+As far as we could determine, Velarium is the fastest RISC-V executor available today. If we missed a faster implementation, please point us to it.
+
 ## Available now and planned
 
 The benchmarks currently run RISC-V programs and optionally count executed guest instructions.
@@ -44,10 +46,30 @@ O2, untraced.
 > [!note]
 > Fibonacci's small negative counting overhead is consistent with natural variation in wall-clock time.
 
+### Intel Xeon Platinum 8488C (AWS EC2)
+
+O2, untraced. Ubuntu 26.04, Rust 1.100.0-nightly (2026-09-14), GCC 15.2.0.
+
+| Workload | % of native x64 throughput | % of native i686 throughput | Counted GIPS | Uncounted GIPS | Counting overhead |
+|---|---:|---:|---:|---:|---:|
+| LZ4 | 36.27% | 45.39% | 3.868 | 4.274 | +10.49% |
+| WASM parser | 53.71% | 68.19% | 3.711 | 4.168 | +12.32% |
+| Fibonacci | 100.00% | 100.01% | 15.805 | 16.198 | +2.49% |
+
+### Arm Neoverse V2 (AWS EC2)
+
+O2, untraced. Ubuntu 26.04, Rust 1.100.0-nightly (2026-09-14), GCC 15.2.0.
+
+| Workload | % of native ARM64 throughput | Counted GIPS | Uncounted GIPS | Counting overhead |
+|---|---:|---:|---:|---:|
+| LZ4 | 35.42% | 4.091 | 4.916 | +20.15% |
+| WASM parser | 47.27% | 2.829 | 2.981 | +5.36% |
+| Fibonacci | 86.55% | 12.111 | 12.076 | -0.29% |
+
 ### Reading the numbers
 
 **% of** - compares uncounted guest throughput with native throughput; 100% means equal
-speed. Native x64 is the ordinary host baseline. Native i686 reduces the width mismatch with RV32,
+speed. Native x64 or ARM64 is the ordinary host baseline. On x64, native i686 reduces the width mismatch with RV32,
 giving a more isolated view of the overhead. It does not isolate virtualization cost exactly:
 register availability, ABI, libraries and allocators also differ between these builds.
 
