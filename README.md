@@ -101,7 +101,9 @@ loading, input preloading, guest memory reset or output checking. Native allocat
 input cleanup are timed; guest allocations are reclaimed by the untimed reset.
 
 The compiler/runtime engine is closed source and supplied precompiled. The workload sources,
-fixtures and measurement harness are here to inspect. **Don't take our fixtures or harness on trust**:
+fixtures and measurement harness are here to inspect.
+
+**Don't take our fixtures or harness on trust**:
 change the inputs, check the timing boundaries and bring your own workloads. Publish your results,
 including unfavorable ones, with the machine details and JSON report. We'd like to see them too.
 
