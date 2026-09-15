@@ -56,6 +56,16 @@ O2, untraced. Ubuntu 26.04, Rust 1.100.0-nightly (2026-09-14), GCC 15.2.0.
 | WASM parser | 53.71% | 68.19% | 3.711 | 4.168 | +12.32% |
 | Fibonacci | 100.00% | 100.01% | 15.805 | 16.198 | +2.49% |
 
+### AMD EPYC 9R45 (AWS EC2)
+
+O2, untraced. Ubuntu 26.04, Rust 1.100.0-nightly (2026-09-14), GCC 15.2.0.
+
+| Workload | % of native x64 throughput | % of native i686 throughput | Counted GIPS | Uncounted GIPS | Counting overhead |
+|---|---:|---:|---:|---:|---:|
+| LZ4 | 37.20% | 44.86% | 5.500 | 6.383 | +16.04% |
+| WASM parser | 54.00% | 65.80% | 5.848 | 6.361 | +8.76% |
+| Fibonacci | 99.80% | 99.82% | 22.260 | 22.247 | -0.06% |
+
 ### Arm Neoverse V2 (AWS EC2)
 
 O2, untraced. Ubuntu 26.04, Rust 1.100.0-nightly (2026-09-14), GCC 15.2.0.
