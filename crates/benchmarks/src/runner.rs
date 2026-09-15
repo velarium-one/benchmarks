@@ -1,4 +1,4 @@
-//! Four-arm orchestration: exact preparation products precede separately timed invocations.
+//! Native/Vehicle comparison: exact preparation products precede separately timed invocations.
 
 use std::{path::PathBuf, process::Command, time::Instant};
 use serde::Serialize;
@@ -42,11 +42,11 @@ pub struct Report {
     pub validation: &'static str,
     pub environment: Environment,
     pub guest: Product,
-    pub native_products: [Product; 2],
+    pub native_products: Vec<Product>,
     pub vehicle_optimization: Optimization,
     pub vehicle_products: Vec<VehicleProduct>,
     pub host: NativeRecord,
-    pub i686: NativeRecord,
+    pub i686: Option<NativeRecord>,
     pub uncounted_samples: Vec<Sample>,
     pub counted_samples: Vec<Sample>,
     pub comparison: Comparison,
@@ -66,13 +66,28 @@ fn command_text(program: &str, args: &[&str]) -> Result<String> {
     Ok(text.trim().to_owned())
 }
 
+/// Preserve the kernel's CPU identity without inventing a marketing name for ARM parts.
+pub fn cpu_identity(cpuinfo: &str) -> Result<String> {
+    let field = |name: &str| cpuinfo.lines().find(|line| {
+        line.split_once(':').is_some_and(|(key, _)| key.trim() == name)
+    });
+    if let Some(model) = field("model name") {
+        return Ok(model.to_owned());
+    }
+
+    // ARM kernels normally expose identification registers rather than an x86-style model name.
+    let mut identity = Vec::new();
+    for name in ["CPU implementer", "CPU architecture", "CPU variant", "CPU part", "CPU revision"] {
+        identity.push(field(name).ok_or_else(|| format!("CPU identity unavailable: {name}"))?);
+    }
+
+    Ok(identity.join("; "))
+}
+
 fn environment() -> Result<Environment> {
     // Establish the execution host and the process's allowed CPUs.
     let cpuinfo = std::fs::read_to_string("/proc/cpuinfo")?;
-    let cpu = cpuinfo.lines()
-        .find(|line| line.starts_with("model name"))
-        .ok_or("CPU model unavailable")?
-        .to_owned();
+    let cpu = cpu_identity(&cpuinfo)?;
 
     let status = std::fs::read_to_string("/proc/self/status")?;
     let allowed_cpus = status.lines()
@@ -111,7 +126,7 @@ fn environment() -> Result<Environment> {
 
 pub fn validate_native(record: &NativeRecord, case: &Case, target: &str, warmups: usize, samples: usize) -> Result<()> {
     let expected_width = match target {
-        build::HOST => 64,
+        build::X86_64 | build::AARCH64 => 64,
         build::I686 => 32,
         _ => return Err("unknown native arm".into()),
     };
@@ -149,7 +164,8 @@ fn native(product: &Product, case: &Case, warmups: usize, samples: usize) -> Res
     Ok(record)
 }
 
-/// [nb:entry] Prepare exact products, then measure four output-validated arms for one fixed input.
+/// [nb:entry] Prepare exact products, then measure host-native and counted/uncounted Vehicles
+/// for one fixed input. On x86, also require the i686 native comparison.
 pub fn run(entry: &Entry, optimization: Optimization, warmups: usize, samples: usize) -> Result<Report> {
     if samples == 0 {
         return Err("sample count must be positive".into());
@@ -157,7 +173,9 @@ pub fn run(entry: &Entry, optimization: Optimization, warmups: usize, samples: u
 
     // Establish all build products and preload the client-owned snapshot before measurement.
     let case = Case::load(&entry.fixture)?;
-    let native_products = [build::native(entry, build::HOST)?, build::native(entry, build::I686)?];
+    let targets = build::NativeTargets::current()?;
+    let host_product = build::native(entry, targets.host)?;
+    let i686_product = targets.i686.map(|target| build::native(entry, target)).transpose()?;
     let guest = build::guest(entry)?;
 
     let environment = environment()?;
@@ -202,8 +220,9 @@ pub fn run(entry: &Entry, optimization: Optimization, warmups: usize, samples: u
     }
 
     // Workers report internal durations; startup, pipe transfer and JSON decoding are not timed.
-    let host = native(&native_products[0], &case, warmups, samples)?;
-    let i686 = native(&native_products[1], &case, warmups, samples)?;
+    let host = native(&host_product, &case, warmups, samples)?;
+    let i686 = i686_product.as_ref()
+        .map(|product| native(product, &case, warmups, samples)).transpose()?;
 
     // Alternate Vehicle order across both warmup and measured invocations.
     // invariant: session order is uncounted, counted because preparation iterates [false, true].
@@ -232,7 +251,8 @@ pub fn run(entry: &Entry, optimization: Optimization, warmups: usize, samples: u
 
     // Compare complete, validated arms; observe timer overhead without subtracting it.
     let comparison = measurement::compare(
-        &host.samples, &i686.samples, &uncounted_samples, &counted_samples,
+        &host.samples, i686.as_ref().map(|record| record.samples.as_slice()),
+        &uncounted_samples, &counted_samples,
     )?;
 
     let timer_overhead_ns = (0..100).map(|_| {
@@ -248,7 +268,7 @@ pub fn run(entry: &Entry, optimization: Optimization, warmups: usize, samples: u
         validation: case.validation_label(),
         environment,
         guest,
-        native_products,
+        native_products: std::iter::once(host_product).chain(i686_product).collect(),
         vehicle_optimization: optimization,
         vehicle_products,
         host,
@@ -263,7 +283,7 @@ pub fn run(entry: &Entry, optimization: Optimization, warmups: usize, samples: u
             "Vehicle invoke only, Monolithic GCC, untraced; ",
             "complete accessible memory reset and bindings prepared before timer; ",
             "snapshots/compilation/loading/session setup/oracle checks excluded. ",
-            "Native release target-default CPU/SIMD, x64 glibc or i686 musl allocator: ",
+            "Native release target-default CPU/SIMD, host glibc and (on x86 only) i686 musl allocator: ",
             "copy/allocation/work/projection/ordinary input cleanup included. ",
             "Native result Vec allocation is included, result destruction excluded; ",
             "guest bump allocations are reclaimed by untimed session reset. No timer subtraction. ",
@@ -276,11 +296,15 @@ pub fn run(entry: &Entry, optimization: Optimization, warmups: usize, samples: u
 pub fn print(report: &Report) {
     let comparison = &report.comparison;
 
-    println!("{} (-{:?}): Guest {:.2}% of host-native, {:.2}% of i686; counted {:.3} GIPS; uncounted {:.3} GIPS; counting overhead {:+.2}%",
+    let i686 = comparison.vehicle_percent_i686
+        .map(|percent| format!(", {percent:.2}% of i686"))
+        .unwrap_or_default();
+
+    println!("{} (-{:?}): Guest {:.2}% of host-native ({}){i686}; counted {:.3} GIPS; uncounted {:.3} GIPS; counting overhead {:+.2}%",
         report.entry.name(),
         report.vehicle_optimization,
         comparison.vehicle_percent_host,
-        comparison.vehicle_percent_i686,
+        report.host.target,
         comparison.counted_hz / 1e9,
         comparison.uncounted_hz_estimate / 1e9,
         comparison.counting_overhead_percent,

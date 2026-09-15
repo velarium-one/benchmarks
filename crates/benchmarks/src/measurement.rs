@@ -47,16 +47,17 @@ pub fn summarize(samples: &[Sample], counted: bool) -> Result<Summary> {
     })
 }
 
-/// [nb:core] Four accepted arms and their rate calculations. Raw samples remain separate;
+/// [nb:core] Accepted native and Vehicle arms and their rate calculations. The i686 baseline
+/// is present only on x86 hosts. Raw samples remain separate;
 /// the estimated uncounted rate uses the matching counted arm's instruction total.
 #[derive(Debug, serde::Serialize)]
 pub struct Comparison {
     pub host: Summary,
-    pub i686: Summary,
+    pub i686: Option<Summary>,
     pub uncounted: Summary,
     pub counted: Summary,
     pub vehicle_percent_host: f64,
-    pub vehicle_percent_i686: f64,
+    pub vehicle_percent_i686: Option<f64>,
     pub counted_hz: f64,
     /// Derived from counted instructions and uncounted time, assuming identical guest work.
     pub uncounted_hz_estimate: f64,
@@ -64,18 +65,20 @@ pub struct Comparison {
 }
 
 /// Arms must execute the same guest workload/input; only the counted Vehicle measures instructions.
-pub fn compare(host: &[Sample], i686: &[Sample], uncounted: &[Sample], counted: &[Sample]) -> Result<Comparison> {
-    if [i686.len(), uncounted.len(), counted.len()].iter().any(|n| *n != host.len()) {
+pub fn compare(host: &[Sample], i686: Option<&[Sample]>, uncounted: &[Sample], counted: &[Sample]) -> Result<Comparison> {
+    if uncounted.len() != host.len() || counted.len() != host.len()
+        || i686.is_some_and(|samples| samples.len() != host.len())
+    {
         return Err("arms have different sample counts".into());
     }
 
     let host = summarize(host, false)?;
-    let i686 = summarize(i686, false)?;
+    let i686 = i686.map(|samples| summarize(samples, false)).transpose()?;
     let uncounted = summarize(uncounted, false)?;
     let counted = summarize(counted, true)?;
 
     let vehicle_percent_host = 100.0 * host.mean_ns / uncounted.mean_ns;
-    let vehicle_percent_i686 = 100.0 * i686.mean_ns / uncounted.mean_ns;
+    let vehicle_percent_i686 = i686.as_ref().map(|summary| 100.0 * summary.mean_ns / uncounted.mean_ns);
 
     let instructions = counted.total_instructions.expect("counted summary") as f64;
     let counted_hz = instructions * 1e9 / counted.total_ns as f64;

@@ -55,6 +55,7 @@ pub fn measure(case: &Case, warmups: usize, repeats: usize,
 
     let target = match (std::env::consts::ARCH, cfg!(target_env = "musl")) {
         ("x86_64", false) => "x86_64-unknown-linux-gnu",
+        ("aarch64", false) => "aarch64-unknown-linux-gnu",
         ("x86", true) => "i686-unknown-linux-musl",
         _ => return Err("unsupported native worker target".into()),
     };

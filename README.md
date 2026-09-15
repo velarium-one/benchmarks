@@ -1,10 +1,13 @@
 # Velarium benchmarks
 
 Velarium is a RISC-V execution engine designed for zkVM workloads. Its goal is native-like
-performance, with instruction accounting and configurable execution traces. Rather than
-interpreting or transpiling instructions individually, it recovers the program's control flow and
-register data flow and recompiles it into native code. This repository lets you compare that
-execution with native builds of the same program.
+performance while preserving RISC-V execution semantics.
+
+It is a whole-program AOT recompiler. Unlike interpreters and JIT binary translators, Velarium
+recovers the program’s control flow and register data flow, then recompiles the recovered program as
+optimized native code.
+
+This repository lets you compare that execution with native builds of the same program.
 
 ## Available now and planned
 
@@ -59,7 +62,8 @@ time. Counting overhead is the change in execution time when counting is enabled
 
 ## Inspect it, change it, measure it
 
-The same workload source builds for RV32, native x64 and native i686. Stock fixtures have independent
+The same workload source builds for RV32 and the native host (x64 or ARM64). On x64, it also builds
+for native i686. Stock fixtures have independent
 expected outputs, and every measured sample must match. Timings cover execution, not compilation,
 loading, input preloading, guest memory reset or output checking. Native allocation and ordinary
 input cleanup are timed; guest allocations are reclaimed by the untimed reset.
@@ -71,8 +75,10 @@ including unfavorable ones, with the machine details and JSON report. We'd like 
 
 ## Run
 
-For the full comparison, use x86_64 GNU/Linux with glibc 2.39 or newer, GCC, Rust nightly and the
-`riscv32i-unknown-none-elf` and `i686-unknown-linux-musl` Rust targets.
+Use x86_64 or ARM64 GNU/Linux with glibc 2.39 or newer, GCC, Rust nightly and the
+`riscv32i-unknown-none-elf` Rust target. On x86_64, also install `i686-unknown-linux-musl` and
+GCC's multilib support. ARM64 compares against ARM64 native only; i686 fields are `null` in its
+JSON reports. Both hosts report counted/uncounted guest IPS and counting overhead.
 
 Ordinary Cargo commands download the pinned, precompiled engine automatically, using `sh`, `curl`,
 `sha256sum`, `tar`/`gzip` and `mktemp`.

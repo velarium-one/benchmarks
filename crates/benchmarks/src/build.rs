@@ -4,9 +4,35 @@ use std::{path::PathBuf, process::{Command, Stdio}};
 use serde::Serialize;
 use crate::{Result, cases::Entry};
 
-pub const HOST: &str = "x86_64-unknown-linux-gnu";
+pub const X86_64: &str = "x86_64-unknown-linux-gnu";
+pub const AARCH64: &str = "aarch64-unknown-linux-gnu";
 pub const I686: &str = "i686-unknown-linux-musl";
 pub const GUEST: &str = "riscv32i-unknown-none-elf";
+
+/// The native comparisons available on an execution host. Selected targets are required;
+/// a build or execution failure must not silently remove a baseline.
+pub struct NativeTargets {
+    pub host: &'static str,
+    pub i686: Option<&'static str>,
+}
+
+impl NativeTargets {
+    pub fn for_arch(architecture: &str) -> Result<Self> {
+        match architecture {
+            "x86_64" => Ok(Self { host: X86_64, i686: Some(I686) }),
+            "aarch64" => Ok(Self { host: AARCH64, i686: None }),
+            _ => Err(format!("unsupported benchmark host architecture: {architecture}").into()),
+        }
+    }
+
+    pub fn current() -> Result<Self> {
+        Self::for_arch(std::env::consts::ARCH)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &'static str> {
+        std::iter::once(self.host).chain(self.i686)
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Product {
@@ -23,7 +49,7 @@ pub fn guest(entry: &Entry) -> Result<Product> {
 
 pub fn native(entry: &Entry, target: &str) -> Result<Product> {
     let expected_elf_class = match target {
-        HOST => 2, // ELFCLASS64
+        X86_64 | AARCH64 => 2, // ELFCLASS64
         I686 => 1, // ELFCLASS32
         _ => return Err("unsupported native target".into()),
     };
