@@ -9,7 +9,10 @@ optimized native code.
 
 This repository lets you compare that execution with native builds of the same program.
 
-As far as we could determine, Velarium is the fastest RISC-V executor available today. If we missed a faster implementation, please point us to it.
+As far as we could determine, Velarium is the fastest RISC-V executor available today. If we missed
+a faster implementation, please point us to it.
+
+Velarium is available for evaluation and integration.
 
 ## Available now and planned
 
@@ -140,6 +143,11 @@ The script creates `guest/my_workload` with one entry, `src/bin/main`. Pass an o
 argument to choose another entry name. The starter adds two inputs; replace it with your workload
 in `main.rs`. Its adjacent `fixture.toml` supplies the inputs and expected output and explains
 the available fields in comments. No separate native implementation or harness registration is needed.
+
+## Contact
+
+If you're interested in evaluating or integrating Velarium for a zkVM, prover, or other RISC-V
+workload, contact us at **hello@velarium.one**.
 
 ## License
 
